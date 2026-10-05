@@ -1,0 +1,360 @@
+-- language: Luau, target: Roblox, injector: any
+-- NEXUS Launcher — загружает NEXUS.lua с pastefy и запускает
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local LP = Players.LocalPlayer
+
+-- ============================================================
+-- КОНФИГ ЛАУНЧЕРА
+-- ============================================================
+
+local SCRIPT_URL = "https://pastefy.app/tFUpHIwq/raw"  -- raw-версия, не HTML
+local GAME_NAME = "Smear"
+local LAUNCHER_NAME = "NEXUS"
+local LAUNCHER_VERSION = "v5"
+
+-- ============================================================
+-- HTTP LOADER (под разные executor'ы)
+-- ============================================================
+
+local function httpGet(url)
+    local ok, res = pcall(function() return game:HttpGet(url) end)
+    if ok and res and #res > 0 then return res end
+    if request then
+        local ok2, r = pcall(function() return request({ Url = url, Method = "GET" }).Body end)
+        if ok2 and r then return r end
+    end
+    if http_request then
+        local ok3, r = pcall(function() return http_request({ Url = url, Method = "GET" }).Body end)
+        if ok3 and r then return r end
+    end
+    if syn and syn.request then
+        local ok4, r = pcall(function() return syn.request({ Url = url, Method = "GET" }).Body end)
+        if ok4 and r then return r end
+    end
+    return nil
+end
+
+local function loadCode(code)
+    if not code then return nil, "empty code" end
+    if loadstring then
+        local ok, fn = pcall(loadstring, code)
+        if ok and fn then return fn end
+    end
+    if load then
+        local ok, fn = pcall(load, code)
+        if ok and fn then return fn end
+    end
+    return nil, "loadstring unavailable"
+end
+
+-- ============================================================
+-- GUI
+-- ============================================================
+
+local pg = LP:WaitForChild("PlayerGui")
+
+-- удаляем старый лаунчер, если есть
+local old = pg:FindFirstChild("NexusLauncher")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "NexusLauncher"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 500
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = pg
+
+-- фон (размытый тёмный)
+local bg = Instance.new("Frame")
+bg.Size = UDim2.new(1, 0, 1, 0)
+bg.BackgroundColor3 = Color3.fromRGB(8, 9, 13)
+bg.BackgroundTransparency = 0.15
+bg.BorderSizePixel = 0
+bg.Parent = gui
+
+-- центрирующее окно
+local win = Instance.new("Frame")
+win.Size = UDim2.fromOffset(460, 320)
+win.AnchorPoint = Vector2.new(0.5, 0.5)
+win.Position = UDim2.fromScale(0.5, 0.5)
+win.BackgroundColor3 = Color3.fromRGB(13, 14, 18)
+win.BorderSizePixel = 0
+win.Active = true
+win.Parent = gui
+
+local winCorner = Instance.new("UICorner")
+winCorner.CornerRadius = UDim.new(0, 16)
+winCorner.Parent = win
+
+local winStroke = Instance.new("UIStroke")
+winStroke.Color = Color3.fromRGB(44, 47, 60)
+winStroke.Thickness = 1
+winStroke.Parent = win
+
+-- градиент заголовка
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 70)
+header.BackgroundColor3 = Color3.fromRGB(20, 21, 27)
+header.BorderSizePixel = 0
+header.Parent = win
+
+local headerCorner = Instance.new("UICorner")
+headerCorner.CornerRadius = UDim.new(0, 16)
+headerCorner.Parent = header
+
+local headerFix = Instance.new("Frame")
+headerFix.Size = UDim2.new(1, 0, 0, 16)
+headerFix.Position = UDim2.new(0, 0, 1, -16)
+headerFix.BackgroundColor3 = Color3.fromRGB(20, 21, 27)
+headerFix.BorderSizePixel = 0
+headerFix.Parent = header
+
+local headerGrad = Instance.new("UIGradient")
+headerGrad.Color = ColorSequence.new(Color3.fromRGB(30, 34, 50), Color3.fromRGB(20, 21, 27))
+headerGrad.Parent = header
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -40, 0, 40)
+title.Position = UDim2.fromOffset(24, 12)
+title.BackgroundTransparency = 1
+title.RichText = true
+title.TextColor3 = Color3.fromRGB(230, 232, 240)
+title.TextSize = 22
+title.Font = Enum.Font.GothamBlack
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Text = '<font color="#6ea0ff">NEXUS</font> <font color="#8a90a6">' .. LAUNCHER_VERSION .. '</font>'
+title.Parent = header
+
+local subtitle = Instance.new("TextLabel")
+subtitle.Size = UDim2.new(1, -40, 0, 18)
+subtitle.Position = UDim2.fromOffset(24, 44)
+subtitle.BackgroundTransparency = 1
+subtitle.TextColor3 = Color3.fromRGB(138, 144, 166)
+subtitle.TextSize = 12
+subtitle.Font = Enum.Font.Gotham
+subtitle.TextXAlignment = Enum.TextXAlignment.Left
+subtitle.Text = "Private launcher · select game"
+subtitle.Parent = header
+
+-- ============================================================
+-- КНОПКА ИГРЫ
+-- ============================================================
+
+local gameBtn = Instance.new("TextButton")
+gameBtn.Size = UDim2.new(1, -48, 0, 96)
+gameBtn.Position = UDim2.fromOffset(24, 100)
+gameBtn.BackgroundColor3 = Color3.fromRGB(27, 29, 37)
+gameBtn.BorderSizePixel = 0
+gameBtn.AutoButtonColor = false
+gameBtn.Text = ""
+gameBtn.Parent = win
+
+local gbCorner = Instance.new("UICorner")
+gbCorner.CornerRadius = UDim.new(0, 12)
+gbCorner.Parent = gameBtn
+
+local gbStroke = Instance.new("UIStroke")
+gbStroke.Color = Color3.fromRGB(44, 47, 60)
+gbStroke.Thickness = 1
+gbStroke.Parent = gameBtn
+
+-- иконка слева (квадрат)
+local gbIcon = Instance.new("Frame")
+gbIcon.Size = UDim2.fromOffset(56, 56)
+gbIcon.Position = UDim2.new(0, 20, 0.5, -28)
+gbIcon.BackgroundColor3 = Color3.fromRGB(110, 160, 255)
+gbIcon.BorderSizePixel = 0
+gbIcon.Parent = gameBtn
+
+local gbIconCorner = Instance.new("UICorner")
+gbIconCorner.CornerRadius = UDim.new(0, 10)
+gbIconCorner.Parent = gbIcon
+
+local gbIconText = Instance.new("TextLabel")
+gbIconText.Size = UDim2.fromScale(1, 1)
+gbIconText.BackgroundTransparency = 1
+gbIconText.Text = "S"
+gbIconText.TextColor3 = Color3.new(1, 1, 1)
+gbIconText.TextSize = 28
+gbIconText.Font = Enum.Font.GothamBlack
+gbIconText.Parent = gbIcon
+
+-- название игры
+local gbName = Instance.new("TextLabel")
+gbName.Size = UDim2.new(1, -120, 0, 24)
+gbName.Position = UDim2.fromOffset(94, 22)
+gbName.BackgroundTransparency = 1
+gbName.Text = GAME_NAME
+gbName.TextColor3 = Color3.fromRGB(230, 232, 240)
+gbName.TextSize = 18
+gbName.Font = Enum.Font.GothamBold
+gbName.TextXAlignment = Enum.TextXAlignment.Left
+gbName.Parent = gameBtn
+
+-- описание
+local gbDesc = Instance.new("TextLabel")
+gbDesc.Size = UDim2.new(1, -120, 0, 18)
+gbDesc.Position = UDim2.fromOffset(94, 46)
+gbDesc.BackgroundTransparency = 1
+gbDesc.Text = "NEXUS script · Auto-Mace, Auto-Crit, Universal"
+gbDesc.TextColor3 = Color3.fromRGB(138, 144, 166)
+gbDesc.TextSize = 12
+gbDesc.Font = Enum.Font.Gotham
+gbDesc.TextXAlignment = Enum.TextXAlignment.Left
+gbDesc.Parent = gameBtn
+
+-- стрелка справа
+local gbArrow = Instance.new("TextLabel")
+gbArrow.Size = UDim2.fromOffset(30, 30)
+gbArrow.Position = UDim2.new(1, -50, 0.5, -15)
+gbArrow.BackgroundTransparency = 1
+gbArrow.Text = "→"
+gbArrow.TextColor3 = Color3.fromRGB(110, 160, 255)
+gbArrow.TextSize = 24
+gbArrow.Font = Enum.Font.GothamBold
+gbArrow.Parent = gameBtn
+
+-- статус снизу
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -48, 0, 20)
+status.Position = UDim2.new(0, 24, 1, -50)
+status.BackgroundTransparency = 1
+status.Text = "Ready"
+status.TextColor3 = Color3.fromRGB(138, 144, 166)
+status.TextSize = 12
+status.Font = Enum.Font.Gotham
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = win
+
+-- ============================================================
+-- АНИМАЦИЯ HOVER
+-- ============================================================
+
+gameBtn.MouseEnter:Connect(function()
+    TweenService:Create(gameBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(34, 36, 46) }):Play()
+    TweenService:Create(gbStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(110, 160, 255) }):Play()
+end)
+gameBtn.MouseLeave:Connect(function()
+    TweenService:Create(gameBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(27, 29, 37) }):Play()
+    TweenService:Create(gbStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(44, 47, 60) }):Play()
+end)
+
+-- ============================================================
+-- ЗАГРУЗКА СКРИПТА
+-- ============================================================
+
+local loading = false
+
+local function setStatus(text, color)
+    status.Text = text
+    status.TextColor3 = color or Color3.fromRGB(138, 144, 166)
+end
+
+local function fadeOutAndDestroy()
+    local tween = TweenService:Create(win, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 1
+    })
+    tween:Play()
+
+    -- прозрачность всех детей через CanvasGroup эффект — но проще просто удалить после
+    TweenService:Create(header, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(headerFix, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(gameBtn, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(gbIcon, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+
+    -- фон тоже исчезает
+    TweenService:Create(bg, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+
+    -- удаляем всё через 0.35 сек
+    task.delay(0.35, function()
+        gui:Destroy()
+    end)
+end
+
+local function launchScript()
+    if loading then return end
+    loading = true
+
+    setStatus("Connecting to NEXUS server...", Color3.fromRGB(110, 160, 255))
+    gameBtn.AutoButtonColor = false
+    gameBtn.BackgroundColor3 = Color3.fromRGB(40, 44, 60)
+    gbArrow.Text = "⏳"
+
+    -- 1. Скачиваем код
+    task.spawn(function()
+        local code = httpGet(SCRIPT_URL)
+        if not code or #code < 100 then
+            loading = false
+            setStatus("Failed to download script", Color3.fromRGB(255, 70, 85))
+            gameBtn.BackgroundColor3 = Color3.fromRGB(27, 29, 37)
+            gbArrow.Text = "→"
+            return
+        end
+
+        setStatus("Script downloaded (" .. math.floor(#code / 1024) .. " KB). Loading...", Color3.fromRGB(85, 255, 136))
+
+        -- 2. Компилируем
+        local fn, err = loadCode(code)
+        if not fn then
+            loading = false
+            setStatus("Compile error: " .. tostring(err), Color3.fromRGB(255, 70, 85))
+            gameBtn.BackgroundColor3 = Color3.fromRGB(27, 29, 37)
+            gbArrow.Text = "→"
+            return
+        end
+
+        -- 3. Запускаем в отдельном потоке, чтобы не блокировать
+        task.spawn(function()
+            local ok, runErr = pcall(fn)
+            if not ok then
+                loading = false
+                setStatus("Runtime error: " .. tostring(runErr):sub(1, 80), Color3.fromRGB(255, 70, 85))
+                gameBtn.BackgroundColor3 = Color3.fromRGB(27, 29, 37)
+                gbArrow.Text = "→"
+                return
+            end
+            -- всё ок — скрипт загружен
+            setStatus("Loaded. Closing launcher...", Color3.fromRGB(85, 255, 136))
+            gbArrow.Text = "✓"
+            task.wait(0.25)
+            fadeOutAndDestroy()
+        end)
+    end)
+end
+
+gameBtn.MouseButton1Click:Connect(launchScript)
+
+-- ============================================================
+-- ЗАКРЫТИЕ ПО ESC
+-- ============================================================
+
+local escConn
+escConn = UserInputService.InputBegan:Connect(function(input, gp)
+    if input.KeyCode == Enum.KeyCode.Escape and not gp then
+        if escConn then escConn:Disconnect() end
+        gui:Destroy()
+    end
+end)
+
+-- ============================================================
+-- АНИМАЦИЯ ПОЯВЛЕНИЯ
+-- ============================================================
+
+win.BackgroundTransparency = 1
+header.BackgroundTransparency = 1
+headerFix.BackgroundTransparency = 1
+gameBtn.BackgroundTransparency = 1
+gbIcon.BackgroundTransparency = 1
+
+TweenService:Create(win, TweenInfo.new(0.3), { BackgroundTransparency = 0 }):Play()
+TweenService:Create(header, TweenInfo.new(0.3), { BackgroundTransparency = 0 }):Play()
+TweenService:Create(headerFix, TweenInfo.new(0.3), { BackgroundTransparency = 0 }):Play()
+TweenService:Create(gameBtn, TweenInfo.new(0.3), { BackgroundTransparency = 0 }):Play()
+TweenService:Create(gbIcon, TweenInfo.new(0.3), { BackgroundTransparency = 0 }):Play()
+
+print("[NEXUS Launcher] Ready. Game: " .. GAME_NAME)
