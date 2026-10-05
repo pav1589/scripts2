@@ -1,0 +1,1015 @@
+-- language: Lua, file: LokeiiReplay.lua, target: Roblox
+-- *record movement + animations + items, play back on clone. Full rebuild.*
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- ==================== CONFIG ====================
+local Config = {
+    RecordInterval   = 0.033,
+    CloneTransparency = 0.0,
+    CloneAnchored    = true,
+    AutoDelete       = false,
+    Loop             = false,
+    ShowHUD          = true,
+    RecordAnimations = true,
+    RecordFace       = true,
+    RecordItems      = true,
+}
+
+local Keybinds = {
+    ToggleMenu = Enum.KeyCode.RightAlt,
+}
+
+-- ==================== STATE ====================
+local isRecording   = false
+local recordStart   = 0
+local lastTick      = 0
+local recording     = nil
+
+local isPlaying     = false
+local playbackStart = 0
+local playbackIndex = 1
+local activeClone   = nil
+local cloneAnimator = nil
+local activeTracks  = {}
+local animEvents    = {}
+
+-- ==================== UTIL ====================
+local function notify(text)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Replay", Text = text, Duration = 3,
+        })
+    end)
+    print("[Replay]", text)
+end
+
+local function getAnimator(plr)
+    local char = plr.Character
+    if not char then return nil end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return nil end
+    return hum:FindFirstChildOfClass("Animator")
+end
+
+-- ==================== ANIM HOOK ====================
+local function hookAnimations()
+    local animator = getAnimator(LocalPlayer)
+    if not animator then return end
+    animator.AnimationPlayed:Connect(function(track)
+        if not isRecording then return end
+        if not Config.RecordAnimations then return end
+        local anim = track.Animation
+        if not anim then return end
+        table.insert(animEvents, {
+            time = tick() - recordStart,
+            animation = anim,
+            speed = track.Speed,
+            weight = track.WeightTarget,
+        })
+    end)
+end
+
+-- ==================== RECORD ====================
+local function startRecording()
+    if isRecording then return end
+    if not LocalPlayer.Character then
+        notify("нет персонажа")
+        return
+    end
+    isRecording = true
+    recordStart = tick()
+    lastTick = 0
+    recording = {
+        frames = {},
+        anims = {},
+        items = {},
+        duration = 0,
+    }
+    animEvents = {}
+
+    -- предзапись предметов в руках
+    if Config.RecordItems then
+        local char = LocalPlayer.Character
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") then
+                local ok, c = pcall(function() return t:Clone() end)
+                if ok and c then
+                    c.Parent = nil
+                    recording.items[t.Name] = c
+                end
+            end
+        end
+    end
+
+    hookAnimations()
+    notify("● запись начата")
+end
+
+local function stopRecording()
+    if not isRecording then return end
+    isRecording = false
+    if recording then
+        recording.anims = animEvents
+        recording.duration = tick() - recordStart
+        local ic = 0
+        for _ in pairs(recording.items) do ic = ic + 1 end
+        notify(string.format("■ запись: %.2fс | %d кадров | %d анимаций | %d предметов",
+            recording.duration, #recording.frames, #recording.anims, ic))
+    end
+end
+
+local function captureFrame()
+    if not isRecording then return end
+    local now = tick() - recordStart
+    if now - lastTick < Config.RecordInterval then return end
+    lastTick = now
+
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local head = char:FindFirstChild("Head")
+
+    local face
+    if Config.RecordFace and head then
+        for _, d in ipairs(head:GetChildren()) do
+            if d:IsA("Decal") then face = d.Texture break end
+        end
+    end
+
+    local tools = {}
+    if Config.RecordItems then
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") then
+                table.insert(tools, t.Name)
+                if not recording.items[t.Name] then
+                    local ok, c = pcall(function() return t:Clone() end)
+                    if ok and c then
+                        c.Parent = nil
+                        recording.items[t.Name] = c
+                    end
+                end
+            end
+        end
+    end
+
+    table.insert(recording.frames, {
+        time = now,
+        cframe = hrp.CFrame,
+        headCFrame = head and head.CFrame or nil,
+        health = hum and hum.Health or 100,
+        face = face,
+        tools = tools,
+    })
+end
+
+-- ==================== MANUAL CLONE ====================
+local function manualClone(char)
+    if not char then return nil end
+    local model = Instance.new("Model")
+    model.Name = "ReplayClone_" .. tostring(math.random(1000, 9999))
+    model.Archivable = true
+
+    local map = {}
+
+    -- BasePart / Decal / Mesh
+    for _, p in ipairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then
+            local np
+            if p:IsA("MeshPart") then
+                np = Instance.new("MeshPart")
+                np.MeshId = p.MeshId
+                np.TextureID = p.TextureID
+            else
+                np = Instance.new("Part")
+                pcall(function() np.Shape = p.Shape end)
+            end
+            np.Name = p.Name
+            np.Size = p.Size
+            np.Color = p.Color
+            np.Material = p.Material
+            np.Transparency = p.Transparency
+            np.Reflectance = p.Reflectance
+            np.CanCollide = false
+            np.CanQuery = false
+            np.CanTouch = false
+            np.Anchored = false
+            np.Massless = true
+            np.CFrame = p.CFrame
+            np.Parent = model
+            map[p] = np
+
+        elseif p:IsA("Decal") then
+            local nd = Instance.new("Decal")
+            nd.Name = p.Name
+            nd.Texture = p.Texture
+            nd.Face = p.Face
+            nd.Transparency = p.Transparency
+            map[p] = nd
+
+        elseif p:IsA("SpecialMesh") or p:IsA("BlockMesh")
+            or p:IsA("CylinderMesh") or p:IsA("SphereMesh") then
+            local nm = p:Clone()
+            map[p] = nm
+        end
+    end
+
+    -- вкладываем Decal и Mesh в их Part
+    for old, new in pairs(map) do
+        if new:IsA("Decal") or new:IsA("DataModelMesh") then
+            local newParent = map[old.Parent]
+            if newParent and newParent:IsA("BasePart") then
+                new.Parent = newParent
+            end
+        end
+    end
+
+    -- PrimaryPart + сварка
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+        or model:FindFirstChild("UpperTorso")
+        or model:FindFirstChild("Torso")
+        or model:FindFirstChildWhichIsA("BasePart")
+
+    if hrp then
+        model.PrimaryPart = hrp
+        hrp.Anchored = Config.CloneAnchored
+        for _, p in ipairs(model:GetChildren()) do
+            if p:IsA("BasePart") and p ~= hrp then
+                local w = Instance.new("WeldConstraint")
+                w.Part0 = hrp
+                w.Part1 = p
+                w.Parent = p
+            end
+        end
+    end
+
+    local hum = Instance.new("Humanoid")
+    hum.Parent = model
+    hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+    hum.PlatformStand = true
+    hum.AutoRotate = false
+
+    return model
+end
+
+-- ==================== SPAWN CLONE ====================
+local function destroyClone()
+    if activeClone then
+        pcall(function() activeClone:Destroy() end)
+        activeClone = nil
+    end
+    activeTracks = {}
+    cloneAnimator = nil
+end
+
+local function spawnClone()
+    destroyClone()
+    local char = LocalPlayer.Character
+    if not char or not char.Parent then
+        notify("персонаж недоступен")
+        return nil
+    end
+
+    -- Archivable на оригинале
+    local oldArch = char.Archivable
+    char.Archivable = true
+    for _, d in ipairs(char:GetDescendants()) do
+        pcall(function() d.Archivable = true end)
+    end
+
+    local ok, clone = pcall(function() return char:Clone() end)
+    char.Archivable = oldArch
+
+    local usedManual = false
+    if not ok or not clone then
+        notify("Clone() не сработал — ручная сборка")
+        clone = manualClone(char)
+        usedManual = true
+        if not clone then
+            notify("ручная сборка упала")
+            return nil
+        end
+    else
+        clone.Name = "ReplayClone_" .. tostring(math.random(1000, 9999))
+        clone.Archivable = true
+
+        -- вырезаем код и звук
+        for _, d in ipairs(clone:GetDescendants()) do
+            if d:IsA("Script") or d:IsA("LocalScript")
+                or d:IsA("Sound") or d:IsA("SoundGroup")
+                or d:IsA("ForceField") then
+                pcall(function() d:Destroy() end)
+            end
+        end
+
+        -- удаляем Motor6D — ломают позиции при Anchored
+        for _, d in ipairs(clone:GetDescendants()) do
+            if d:IsA("Motor6D") then
+                pcall(function() d:Destroy() end)
+            end
+        end
+
+        -- якорь только на HRP, остальные варятся
+        local hrp = clone:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            clone.PrimaryPart = hrp
+            hrp.Anchored = Config.CloneAnchored
+
+            -- сначала сохраняем все CFrame
+            local cframes = {}
+            for _, p in ipairs(clone:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    cframes[p] = p.CFrame
+                end
+            end
+
+            -- потом якорим, ставим обратно и варим
+            for _, p in ipairs(clone:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    p.CanCollide = false
+                    p.CanQuery = false
+                    p.CanTouch = false
+                    p.Massless = true
+                    p.Transparency = math.clamp(p.Transparency + Config.CloneTransparency, 0, 1)
+
+                    if p ~= hrp then
+                        p.Anchored = false
+                        p.CFrame = cframes[p]
+                        local w = Instance.new("WeldConstraint")
+                        w.Part0 = hrp
+                        w.Part1 = p
+                        w.Parent = p
+                    end
+                elseif p:IsA("Decal") then
+                    p.Transparency = math.clamp(p.Transparency + Config.CloneTransparency, 0, 1)
+                end
+            end
+        else
+            -- фоллбэк: если HRP нет, якорим все
+            for _, p in ipairs(clone:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    p.CanCollide = false
+                    p.Anchored = Config.CloneAnchored
+                    p.Transparency = math.clamp(p.Transparency + Config.CloneTransparency, 0, 1)
+                end
+            end
+        end
+    end
+
+    -- если ручная сборка: применить прозрачность
+    if usedManual then
+        for _, p in ipairs(clone:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.Transparency = math.clamp(p.Transparency + Config.CloneTransparency, 0, 1)
+            elseif p:IsA("Decal") then
+                p.Transparency = math.clamp(p.Transparency + Config.CloneTransparency, 0, 1)
+            end
+        end
+    end
+
+    -- humanoid + новый animator
+    local hum = clone:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+        hum.AutoRotate = false
+        hum.PlatformStand = true
+        local oldAnim = hum:FindFirstChildOfClass("Animator")
+        if oldAnim then oldAnim:Destroy() end
+        cloneAnimator = Instance.new("Animator")
+        cloneAnimator.Parent = hum
+    end
+
+    -- лицо из записи
+    if Config.RecordFace and recording and recording.frames[1] then
+        local faceTex
+        for _, f in ipairs(recording.frames) do
+            if f.face then faceTex = f.face break end
+        end
+        if faceTex then
+            local head = clone:FindFirstChild("Head")
+            if head then
+                for _, d in ipairs(head:GetChildren()) do
+                    if d:IsA("Decal") then d:Destroy() end
+                end
+                local dec = Instance.new("Decal")
+                dec.Name = "face"
+                dec.Texture = faceTex
+                dec.Face = Enum.NormalId.Front
+                dec.Parent = head
+            end
+        end
+    end
+
+    clone.Parent = workspace
+    return clone
+end
+
+-- ==================== ITEMS ====================
+local function applyTools(names)
+    if not activeClone or not recording then return end
+    if not Config.RecordItems then return end
+
+    for _, t in ipairs(activeClone:GetChildren()) do
+        if t:IsA("Tool") then t:Destroy() end
+    end
+
+    local hum = activeClone:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+
+    for _, name in ipairs(names) do
+        local tmpl = recording.items[name]
+        if tmpl then
+            local ok, item = pcall(function() return tmpl:Clone() end)
+            if ok and item then
+                item.Parent = activeClone
+                pcall(function() hum:EquipTool(item) end)
+                -- если EquipTool не сработал — сварим вручную к правой руке
+                task.wait(0.05)
+                if item.Parent == activeClone or item.Parent == hum then
+                    -- уже экипирован, ок
+                else
+                    local rightHand = activeClone:FindFirstChild("RightHand")
+                        or activeClone:FindFirstChild("Right Arm")
+                    local handle = item:FindFirstChild("Handle")
+                    if rightHand and handle then
+                        handle.CFrame = rightHand.CFrame
+                        local w = Instance.new("WeldConstraint")
+                        w.Part0 = rightHand
+                        w.Part1 = handle
+                        w.Parent = handle
+                    end
+                    item.Parent = activeClone
+                end
+            end
+        end
+    end
+end
+
+-- ==================== PLAYBACK ====================
+local function playAnim(anim, speed, weight)
+    if not cloneAnimator then return end
+    local ok, track = pcall(function() return cloneAnimator:LoadAnimation(anim) end)
+    if ok and track then
+        pcall(function()
+            track.Priority = Enum.AnimationPriority.Action
+            track:Play(0.1)
+            track:AdjustSpeed(speed or 1)
+            if weight then track:AdjustWeight(weight, 0.1) end
+        end)
+        activeTracks[anim] = track
+    end
+end
+
+local function stopAllAnims()
+    for _, t in pairs(activeTracks) do
+        pcall(function() t:Stop(0.2) end)
+    end
+    activeTracks = {}
+end
+
+local function startPlayback()
+    if not recording or #recording.frames == 0 then
+        notify("нет записи")
+        return
+    end
+    if isPlaying then stopPlayback() task.wait(0.05) end
+    if isRecording then stopRecording() end
+
+    activeClone = spawnClone()
+    if not activeClone then return end
+
+    for _, ev in ipairs(recording.anims) do ev._fired = false end
+    activeClone:SetAttribute("_lastTools", "")
+
+    isPlaying = true
+    playbackStart = tick()
+    playbackIndex = 1
+    notify("▶ проигрывание начато")
+end
+
+local function stopPlayback()
+    if not isPlaying then return end
+    isPlaying = false
+    stopAllAnims()
+    if Config.AutoDelete then destroyClone() end
+    notify("■ проигрывание остановлено")
+end
+
+local function updatePlayback()
+    if not isPlaying then return end
+    if not activeClone or not activeClone.Parent then isPlaying = false return end
+    if not recording then isPlaying = false return end
+
+    local elapsed = tick() - playbackStart
+    local frames = recording.frames
+
+    if elapsed >= recording.duration then
+        if Config.Loop then
+            playbackStart = tick()
+            playbackIndex = 1
+            stopAllAnims()
+            for _, ev in ipairs(recording.anims) do ev._fired = false end
+            activeClone:SetAttribute("_lastTools", "")
+        else
+            stopPlayback()
+            return
+        end
+    end
+
+    while playbackIndex < #frames and frames[playbackIndex + 1].time <= elapsed do
+        playbackIndex = playbackIndex + 1
+    end
+
+    local cur = frames[playbackIndex]
+    local nxt = frames[playbackIndex + 1]
+
+    local cf
+    if nxt then
+        local dt = nxt.time - cur.time
+        local a = (dt > 0) and ((elapsed - cur.time) / dt) or 0
+        a = math.clamp(a, 0, 1)
+        cf = cur.cframe:Lerp(nxt.cframe, a)
+    else
+        cf = cur.cframe
+    end
+
+    if cf then
+        pcall(function() activeClone:PivotTo(cf) end)
+    end
+
+    if cur.headCFrame then
+        local head = activeClone:FindFirstChild("Head")
+        if head then pcall(function() head.CFrame = cur.headCFrame end) end
+    end
+
+    if Config.RecordItems and cur.tools then
+        local joined = table.concat(cur.tools, ",")
+        if activeClone:GetAttribute("_lastTools") ~= joined then
+            activeClone:SetAttribute("_lastTools", joined)
+            applyTools(cur.tools)
+        end
+    end
+
+    if Config.RecordAnimations then
+        for _, ev in ipairs(recording.anims) do
+            if ev.time <= elapsed and not ev._fired then
+                ev._fired = true
+                playAnim(ev.animation, ev.speed, ev.weight)
+            end
+        end
+    end
+end
+
+-- ==================== WIPE ====================
+local function wipeEverything()
+    if isRecording then pcall(stopRecording) end
+    if isPlaying then pcall(stopPlayback) end
+    pcall(destroyClone)
+    pcall(stopAllAnims)
+    recording = nil
+    animEvents = {}
+    activeTracks = {}
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj.Name:find("ReplayClone_") then
+            pcall(function() obj:Destroy() end)
+        end
+    end
+    local g = gethui and gethui() or CoreGui
+    for _, c in ipairs(g:GetChildren()) do
+        if c.Name == "LokeiiReplay" then
+            pcall(function() c:Destroy() end)
+        end
+    end
+    if getgenv().LokeiiReplay_Conn then
+        pcall(function() getgenv().LokeiiReplay_Conn:Disconnect() end)
+        getgenv().LokeiiReplay_Conn = nil
+    end
+    notify("☠ всё снесено")
+end
+
+-- ==================== UI ====================
+local g = gethui and gethui() or CoreGui
+local old = g:FindFirstChild("LokeiiReplay")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "LokeiiReplay"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = g
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 380, 0, 480)
+frame.Position = UDim2.new(0.5, -190, 0.5, -240)
+frame.BackgroundColor3 = Color3.fromRGB(12, 16, 22)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Visible = false
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = frame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(48, 54, 61)
+stroke.Thickness = 1
+stroke.Parent = frame
+
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 36)
+header.BackgroundColor3 = Color3.fromRGB(20, 26, 34)
+header.BorderSizePixel = 0
+header.Parent = frame
+
+local hC = Instance.new("UICorner")
+hC.CornerRadius = UDim.new(0, 10)
+hC.Parent = header
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -60, 1, 0)
+title.Position = UDim2.new(0, 12, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "LokeiiReplay"
+title.TextColor3 = Color3.fromRGB(230, 237, 243)
+title.TextSize = 14
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = header
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Position = UDim2.new(1, -34, 0, 4)
+closeBtn.BackgroundColor3 = Color3.fromRGB(48, 54, 61)
+closeBtn.BorderSizePixel = 0
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(230, 237, 243)
+closeBtn.TextSize = 18
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Parent = header
+
+local cC = Instance.new("UICorner")
+cC.CornerRadius = UDim.new(0, 6)
+cC.Parent = closeBtn
+
+closeBtn.MouseButton1Click:Connect(function() frame.Visible = false end)
+
+local tabs = Instance.new("Frame")
+tabs.Size = UDim2.new(1, -20, 0, 30)
+tabs.Position = UDim2.new(0, 10, 0, 44)
+tabs.BackgroundTransparency = 1
+tabs.Parent = frame
+
+local tL = Instance.new("UIListLayout")
+tL.FillDirection = Enum.FillDirection.Horizontal
+tL.Padding = UDim.new(0, 4)
+tL.Parent = tabs
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, -20, 1, -128)
+content.Position = UDim2.new(0, 10, 0, 80)
+content.BackgroundTransparency = 1
+content.Parent = frame
+
+local statusFrame = Instance.new("Frame")
+statusFrame.Size = UDim2.new(1, -20, 0, 40)
+statusFrame.Position = UDim2.new(0, 10, 1, -50)
+statusFrame.BackgroundColor3 = Color3.fromRGB(20, 26, 34)
+statusFrame.BorderSizePixel = 0
+statusFrame.Parent = frame
+
+local sfC = Instance.new("UICorner")
+sfC.CornerRadius = UDim.new(0, 6)
+sfC.Parent = statusFrame
+
+local statusLbl = Instance.new("TextLabel")
+statusLbl.Size = UDim2.new(1, -20, 1, 0)
+statusLbl.Position = UDim2.new(0, 10, 0, 0)
+statusLbl.BackgroundTransparency = 1
+statusLbl.Text = "idle"
+statusLbl.TextColor3 = Color3.fromRGB(139, 148, 158)
+statusLbl.TextSize = 12
+statusLbl.Font = Enum.Font.Code
+statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+statusLbl.Parent = statusFrame
+
+local pages = {}
+local tabButtons = {}
+
+local function selectTab(name)
+    for n, p in pairs(pages) do p.Visible = (n == name) end
+    for n, b in pairs(tabButtons) do
+        b.BackgroundColor3 = (n == name) and Color3.fromRGB(31, 111, 235) or Color3.fromRGB(22, 27, 34)
+    end
+end
+
+local function makeTab(name)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 84, 0, 28)
+    btn.BackgroundColor3 = Color3.fromRGB(22, 27, 34)
+    btn.BorderSizePixel = 0
+    btn.Text = name
+    btn.TextColor3 = Color3.fromRGB(230, 237, 243)
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamMedium
+    btn.AutoButtonColor = false
+    btn.Parent = tabs
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = btn
+
+    local page = Instance.new("ScrollingFrame")
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.ScrollBarThickness = 3
+    page.ScrollBarImageColor3 = Color3.fromRGB(48, 54, 61)
+    page.Visible = false
+    page.Parent = content
+
+    local l = Instance.new("UIListLayout")
+    l.Padding = UDim.new(0, 6)
+    l.SortOrder = Enum.SortOrder.LayoutOrder
+    l.Parent = page
+
+    pages[name] = page
+    tabButtons[name] = btn
+    btn.MouseButton1Click:Connect(function() selectTab(name) end)
+    return page
+end
+
+local function makeToggle(p, text, initial, cb)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 30)
+    row.BackgroundColor3 = Color3.fromRGB(22, 27, 34)
+    row.BorderSizePixel = 0
+    row.Parent = p
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = row
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -60, 1, 0)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(230, 237, 243)
+    lbl.TextSize = 13
+    lbl.Font = Enum.Font.GothamMedium
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = row
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 40, 0, 20)
+    btn.Position = UDim2.new(1, -48, 0, 5)
+    btn.BackgroundColor3 = initial and Color3.fromRGB(31, 111, 235) or Color3.fromRGB(48, 54, 61)
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.Parent = row
+
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(1, 0)
+    bc.Parent = btn
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 16, 0, 16)
+    knob.Position = initial and UDim2.new(1, -18, 0, 2) or UDim2.new(0, 2, 0, 2)
+    knob.BackgroundColor3 = Color3.fromRGB(230, 237, 243)
+    knob.BorderSizePixel = 0
+    knob.Parent = btn
+
+    local kc = Instance.new("UICorner")
+    kc.CornerRadius = UDim.new(1, 0)
+    kc.Parent = knob
+
+    local state = initial
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.BackgroundColor3 = state and Color3.fromRGB(31, 111, 235) or Color3.fromRGB(48, 54, 61)
+        knob.Position = state and UDim2.new(1, -18, 0, 2) or UDim2.new(0, 2, 0, 2)
+        if cb then cb(state) end
+    end)
+end
+
+local function makeSlider(p, text, min, max, initial, cb)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 46)
+    row.BackgroundColor3 = Color3.fromRGB(22, 27, 34)
+    row.BorderSizePixel = 0
+    row.Parent = p
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = row
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -20, 0, 18)
+    lbl.Position = UDim2.new(0, 10, 0, 4)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text .. ": " .. string.format("%.3f", initial)
+    lbl.TextColor3 = Color3.fromRGB(230, 237, 243)
+    lbl.TextSize = 12
+    lbl.Font = Enum.Font.GothamMedium
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = row
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(1, -20, 0, 6)
+    bar.Position = UDim2.new(0, 10, 0, 28)
+    bar.BackgroundColor3 = Color3.fromRGB(48, 54, 61)
+    bar.BorderSizePixel = 0
+    bar.Parent = row
+
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(1, 0)
+    bc.Parent = bar
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((initial - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(31, 111, 235)
+    fill.BorderSizePixel = 0
+    fill.Parent = bar
+
+    local fc = Instance.new("UICorner")
+    fc.CornerRadius = UDim.new(1, 0)
+    fc.Parent = fill
+
+    local dragging = false
+    bar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+            or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+            or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if not dragging then return end
+        if i.UserInputType ~= Enum.UserInputType.MouseMovement
+            and i.UserInputType ~= Enum.UserInputType.Touch then return end
+        local rel = math.clamp((i.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        fill.Size = UDim2.new(rel, 0, 1, 0)
+        local v = min + (max - min) * rel
+        lbl.Text = text .. ": " .. string.format("%.3f", v)
+        if cb then cb(v) end
+    end)
+end
+
+local function makeButton(p, text, cb, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = color or Color3.fromRGB(31, 111, 235)
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(230, 237, 243)
+    btn.TextSize = 13
+    btn.Font = Enum.Font.GothamBold
+    btn.AutoButtonColor = false
+    btn.Parent = p
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = btn
+    btn.MouseButton1Click:Connect(cb)
+    return btn
+end
+
+-- ==================== TABS BUILD ====================
+local recTab = makeTab("Record")
+local playTab = makeTab("Play")
+local setTab = makeTab("Settings")
+local dangerTab = makeTab("Danger")
+
+local recStatus = Instance.new("TextLabel")
+recStatus.Size = UDim2.new(1, 0, 0, 40)
+recStatus.BackgroundColor3 = Color3.fromRGB(22, 27, 34)
+recStatus.BorderSizePixel = 0
+recStatus.Text = "записи нет"
+recStatus.TextColor3 = Color3.fromRGB(139, 148, 158)
+recStatus.TextSize = 12
+recStatus.Font = Enum.Font.Code
+recStatus.Parent = recTab
+local rsC = Instance.new("UICorner")
+rsC.CornerRadius = UDim.new(0, 6)
+rsC.Parent = recStatus
+
+makeButton(recTab, "● Начать запись", startRecording, Color3.fromRGB(180, 60, 60))
+makeButton(recTab, "■ Остановить запись", stopRecording, Color3.fromRGB(120, 60, 60))
+makeButton(recTab, "🗑 Очистить запись", function()
+    recording = nil
+    notify("запись очищена")
+end, Color3.fromRGB(60, 60, 60))
+
+makeButton(playTab, "▶ Проиграть", startPlayback, Color3.fromRGB(60, 140, 60))
+makeButton(playTab, "■ Стоп", stopPlayback, Color3.fromRGB(120, 60, 60))
+makeButton(playTab, "🗑 Удалить клон", function()
+    destroyClone()
+    isPlaying = false
+end, Color3.fromRGB(60, 60, 60))
+
+local playStatus = Instance.new("TextLabel")
+playStatus.Size = UDim2.new(1, 0, 0, 40)
+playStatus.BackgroundColor3 = Color3.fromRGB(22, 27, 34)
+playStatus.BorderSizePixel = 0
+playStatus.Text = "клон: нет"
+playStatus.TextColor3 = Color3.fromRGB(139, 148, 158)
+playStatus.TextSize = 12
+playStatus.Font = Enum.Font.Code
+playStatus.Parent = playTab
+local psC = Instance.new("UICorner")
+psC.CornerRadius = UDim.new(0, 6)
+psC.Parent = playStatus
+
+makeSlider(setTab, "Интервал записи", 0.016, 0.1, Config.RecordInterval, function(v) Config.RecordInterval = v end)
+makeSlider(setTab, "Прозрачность клона", 0, 1, Config.CloneTransparency, function(v) Config.CloneTransparency = v end)
+makeToggle(setTab, "Якорь клона", Config.CloneAnchored, function(v) Config.CloneAnchored = v end)
+makeToggle(setTab, "Удалять клон после проигрывания", Config.AutoDelete, function(v) Config.AutoDelete = v end)
+makeToggle(setTab, "Зациклить", Config.Loop, function(v) Config.Loop = v end)
+makeToggle(setTab, "Записывать анимации", Config.RecordAnimations, function(v) Config.RecordAnimations = v end)
+makeToggle(setTab, "Записывать лицо", Config.RecordFace, function(v) Config.RecordFace = v end)
+makeToggle(setTab, "Записывать предметы", Config.RecordItems, function(v) Config.RecordItems = v end)
+makeToggle(setTab, "Показывать HUD", Config.ShowHUD, function(v) Config.ShowHUD = v end)
+
+makeButton(dangerTab, "☠ СНЕСТИ ВСЁ", wipeEverything, Color3.fromRGB(200, 40, 40))
+
+local hud = Instance.new("TextLabel")
+hud.Name = "ReplayHUD"
+hud.Size = UDim2.new(0, 260, 0, 22)
+hud.Position = UDim2.new(0, 14, 0, 60)
+hud.BackgroundTransparency = 0.4
+hud.BackgroundColor3 = Color3.fromRGB(12, 16, 22)
+hud.BorderSizePixel = 0
+hud.TextColor3 = Color3.fromRGB(230, 237, 243)
+hud.TextSize = 12
+hud.Font = Enum.Font.Code
+hud.TextXAlignment = Enum.TextXAlignment.Left
+hud.Text = ""
+hud.Parent = gui
+
+local hC2 = Instance.new("UICorner")
+hC2.CornerRadius = UDim.new(0, 4)
+hC2.Parent = hud
+
+local hP = Instance.new("UIPadding")
+hP.PaddingLeft = UDim.new(0, 8)
+hP.Parent = hud
+
+selectTab("Record")
+
+-- ==================== KEYBIND ====================
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if input.KeyCode == Keybinds.ToggleMenu then
+        frame.Visible = not frame.Visible
+    end
+end)
+
+-- ==================== MAIN LOOP ====================
+getgenv().LokeiiReplay_Conn = RunService.Heartbeat:Connect(function()
+    if isRecording then captureFrame() end
+    if isPlaying then updatePlayback() end
+
+    if Config.ShowHUD then
+        local parts = {}
+        if isRecording then
+            table.insert(parts, "● REC " .. string.format("%.1fс", tick() - recordStart))
+        end
+        if isPlaying then
+            table.insert(parts, "▶ PLAY " .. string.format("%.1f/%.1f",
+                tick() - playbackStart,
+                recording and recording.duration or 0))
+        end
+        hud.Text = #parts > 0 and table.concat(parts, "  |  ") or ""
+        hud.Visible = #parts > 0
+    else
+        hud.Visible = false
+    end
+
+    if recording then
+        local ic = 0
+        for _ in pairs(recording.items or {}) do ic = ic + 1 end
+        recStatus.Text = string.format("кадров: %d | анимаций: %d | предметов: %d | %.2fс",
+            #recording.frames, #(recording.anims or {}), ic, recording.duration)
+    else
+        recStatus.Text = "записи нет"
+    end
+    playStatus.Text = activeClone and ("клон: " .. activeClone.Name) or "клон: нет"
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    if isRecording then stopRecording() end
+end)
+
+notify("загружено. RightAlt — меню.")
