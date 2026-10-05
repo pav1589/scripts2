@@ -1,0 +1,1550 @@
+-- language: Luau, target: Roblox
+-- NEXUS v5 — Auto-Mace (HvH style) + Auto-Crit + Universal + Fake Lag
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
+local HttpService = game:GetService("HttpService")
+local Stats = game:GetService("Stats")
+local SoundService = game:GetService("SoundService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Workspace = game:GetService("Workspace")
+
+local LP = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera or Workspace:WaitForChild("Camera")
+
+-- ============================================================
+-- ЯЗЫК
+-- ============================================================
+
+local LANG = "ru"
+local STR = {
+    ru = {
+        tab_universal = "Универсал", tab_combat = "Бой", tab_mace = "Auto-Mace",
+        tab_hvh = "HvH", tab_visuals = "Визуал", tab_friends = "Друзья",
+        tab_config = "Конфиг", tab_ui = "Интерфейс",
+        enabled = "Включено", key = "Клавиша", mode = "Режим", target = "Цель",
+        smooth = "Плавность", predict = "Упреждение", max_dist = "Макс. дистанция",
+        reset = "Сбросить", reset_target = "Сбросить цель",
+        start = "Старт", stop = "Стоп",
+        fov_third = "FOV от 3-го лица", fov_third_radius = "Дистанция камеры",
+        fov_third_height = "Высота камеры", fov_third_aim = "Цель для камеры",
+        antiaim = "Anti-Aim", fakelag = "Fake Lag",
+        fakelag_viz = "Визуализация Fake Lag",
+        fakelag_amount = "Задержка (сек)", fakelag_viz_color = "Цвет метки",
+        antiaim_mode = "Режим", antiaim_speed = "Скорость",
+        autododge = "Auto-Dodge", autododge_range = "Радиус",
+        spin360 = "Spin 360", spin360_speed = "Скорость",
+        mace_height = "Высота над целью", mace_hit_dist = "Радиус удара",
+        mace_delay = "Таймер возврата", mace_spin_speed = "Скорость кружения",
+        mace_spin_time = "Время кружения", mace_spin_radius = "Радиус кружения",
+        mace_start = "Старт / стоп Auto-Mace",
+        crit_start = "Старт / стоп Auto-Crit",
+        speed = "Скорость", launch = "Подброс", bhop = "Bhop", fly = "Полёт",
+        fly_speed = "Скорость полёта",
+        esp = "ESP", esp_box = "Подсветка", esp_name = "Ник и HP", esp_color = "Цвет",
+        fov_circle = "FOV-круг", crosshair = "Прицел", watermark = "Watermark",
+        killfeed = "Kill feed", killpopup = "Попап убийства",
+        fullbright = "Fullbright", custom_fov = "Свой FOV", fov_val = "FOV камеры",
+        export = "Экспорт", import = "Импорт", reset_cfg = "Сбросить конфиг",
+        unload = "Выгрузить", language = "Язык", menu_key = "Клавиша меню",
+        target_prio = "Приоритет цели", closest = "Ближайший",
+        lowest_hp = "Меньше HP", in_crosshair = "Под прицелом",
+        auto_next = "Авто-следующая цель",
+        add_friend = "Добавить игрока", delete = "Удалить",
+    },
+    en = {
+        tab_universal = "Universal", tab_combat = "Combat", tab_mace = "Auto-Mace",
+        tab_hvh = "HvH", tab_visuals = "Visuals", tab_friends = "Friends",
+        tab_config = "Config", tab_ui = "UI Settings",
+        enabled = "Enabled", key = "Key", mode = "Mode", target = "Target",
+        smooth = "Smooth", predict = "Predict", max_dist = "Max distance",
+        reset = "Reset", reset_target = "Reset target",
+        start = "Start", stop = "Stop",
+        fov_third = "Third person FOV", fov_third_radius = "Camera distance",
+        fov_third_height = "Camera height", fov_third_aim = "Aim at target",
+        antiaim = "Anti-Aim", fakelag = "Fake Lag",
+        fakelag_viz = "Fake Lag visualization",
+        fakelag_amount = "Delay (sec)", fakelag_viz_color = "Marker color",
+        antiaim_mode = "Mode", antiaim_speed = "Speed",
+        autododge = "Auto-Dodge", autododge_range = "Range",
+        spin360 = "Spin 360", spin360_speed = "Speed",
+        mace_height = "Height above target", mace_hit_dist = "Hit range",
+        mace_delay = "Return timer", mace_spin_speed = "Spin speed",
+        mace_spin_time = "Spin time", mace_spin_radius = "Spin radius",
+        mace_start = "Start / stop Auto-Mace",
+        crit_start = "Start / stop Auto-Crit",
+        speed = "Speed", launch = "Launch", bhop = "Bhop", fly = "Fly",
+        fly_speed = "Fly speed",
+        esp = "ESP", esp_box = "Highlight", esp_name = "Name & HP", esp_color = "Color",
+        fov_circle = "FOV circle", crosshair = "Crosshair", watermark = "Watermark",
+        killfeed = "Kill feed", killpopup = "Kill popup",
+        fullbright = "Fullbright", custom_fov = "Custom FOV", fov_val = "Camera FOV",
+        export = "Export", import = "Import", reset_cfg = "Reset config",
+        unload = "Unload", language = "Language", menu_key = "Menu key",
+        target_prio = "Target priority", closest = "Closest",
+        lowest_hp = "Lowest HP", in_crosshair = "Under crosshair",
+        auto_next = "Auto-switch next target",
+        add_friend = "Add player", delete = "Delete",
+    },
+}
+local function L(k) return STR[LANG][k] or k end
+
+-- ============================================================
+-- НАСТРОЙКИ
+-- ============================================================
+
+local DEFAULTS = {
+    -- Cam Lock
+    camEnabled = true, camMode = "Hold", camKey = "Q", camPart = "Head",
+    camSmooth = 0.18, camPredict = 0.0, camRange = 500,
+    camUseFov = true, camVisible = false, camIgnoreTeam = false,
+    targetPrio = "closest", combatAutoNext = true,
+
+    -- Auto-Mace (HvH из старого скрипта)
+    maceEnabled = true, maceKey = "F",
+    maceHeight = 50, maceHitRange = 7, maceDelay = 0.1,
+    maceAim = true, maceSound = true, maceSoundId = "rbxassetid://3744371091",
+
+    -- Auto-Crit
+    critEnabled = true, critKey = "C",
+    critJumpDelay = 0.25, critSpinSpeed = 300, critSpinTime = 0.5,
+    critSpinRadius = 6, critAim = true,
+
+    -- Movement
+    speedEnabled = true, speedKey = "LeftShift", speedValue = 45,
+    launchEnabled = true, launchKey = "E", launchPower = 90, launchCooldown = 0.4,
+    bhop = false, flyEnabled = true, flyKey = "G", flySpeed = 60,
+
+    -- Universal
+    camThirdEnabled = false, camThirdKey = "V",
+    camThirdRadius = 15, camThirdHeight = 4, camThirdAim = true,
+    camThirdSmooth = 0.2,
+
+    -- HvH
+    antiaimEnabled = false, antiaimMode = "Jitter", antiaimSpeed = 8,
+    fakelagEnabled = false, fakelagAmount = 0.05,
+    fakelagViz = true, fakelagVizColor = "78aaff",
+    autododgeEnabled = false, autododgeRange = 15,
+    spin360Enabled = false, spin360Speed = 300,
+
+    -- Visuals
+    espEnabled = true, espBoxes = true, espNames = true, espColor = "ff4655",
+    fovShow = true, fovRadius = 200, fovColor = "78aaff", crosshair = true,
+    watermark = true, killFeed = true, killPopup = true, killSound = true,
+    notifications = true, fullbright = false, customFov = false, camFov = 90,
+
+    friendMarkers = true, markerFade = 0.72,
+
+    menuKey = "RightShift", lang = "ru", friends = {},
+}
+local function copyTable(t)
+    local c = {}
+    for k, v in pairs(t) do c[k] = type(v) == "table" and copyTable(v) or v end
+    return c
+end
+local CFG = copyTable(DEFAULTS)
+LANG = CFG.lang
+
+-- ============================================================
+-- ОБЩЕЕ
+-- ============================================================
+
+local T = {
+    bg = Color3.fromRGB(13, 14, 18), panel = Color3.fromRGB(20, 21, 27), item = Color3.fromRGB(27, 29, 37),
+    stroke = Color3.fromRGB(44, 47, 60), text = Color3.fromRGB(230, 232, 240), dim = Color3.fromRGB(138, 144, 166),
+    accent = Color3.fromRGB(110, 160, 255), good = Color3.fromRGB(85, 255, 136), bad = Color3.fromRGB(255, 70, 85),
+}
+local conns, controls = {}, {}
+local unloaded = false
+local orderCounter = 0
+local function nextOrder() orderCounter = orderCounter + 1 return orderCounter end
+local function track(c) conns[#conns + 1] = c return c end
+
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props or {}) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r or 6) }, o) end
+local function stroke(o, c, t) return new("UIStroke", { Color = c or T.stroke, Thickness = t or 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o) end
+local function tween(o, t, props) TweenService:Create(o, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play() end
+
+local PALETTE = { "55ff88", "ff4655", "ffd24a", "78aaff", "d27bff", "ffffff", "ff9f43" }
+
+local function playSound(id, speed, vol)
+    if not id or id == "" then return end
+    local s = new("Sound", { SoundId = id, PlaybackSpeed = speed or 1, Volume = vol or 1 })
+    s.Parent = SoundService; s:Play()
+    Debris:AddItem(s, 6)
+end
+
+local char, hum, root
+local function refreshMe()
+    char = LP.Character
+    hum = char and char:FindFirstChildOfClass("Humanoid")
+    root = char and char:FindFirstChild("HumanoidRootPart")
+end
+local function getChar(p)
+    local c = p.Character
+    if not c then return end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    local r = c:FindFirstChild("HumanoidRootPart")
+    if h and r and h.Health > 0 then return c, h, r end
+end
+
+local friendSet = {}
+local function rebuildFriendSet()
+    friendSet = {}
+    for _, e in ipairs(CFG.friends) do friendSet[e.name:lower()] = true end
+end
+local function isFriend(p) return friendSet[p.Name:lower()] == true end
+local function sameTeam(p) return p.Team ~= nil and p.Team == LP.Team end
+local function targetable(p)
+    if p == LP or isFriend(p) then return false end
+    if CFG.camIgnoreTeam and sameTeam(p) then return false end
+    return true
+end
+local function findPlayerByName(name)
+    local l = name:lower()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name:lower() == l or p.DisplayName:lower() == l then return p end
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name:lower():sub(1, #l) == l then return p end
+    end
+end
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+local function isVisible(c, part)
+    rayParams.FilterDescendantsInstances = { LP.Character }
+    local o = Camera.CFrame.Position
+    local res = Workspace:Raycast(o, part.Position - o, rayParams)
+    return res == nil or res.Instance:IsDescendantOf(c)
+end
+
+local function scoreTarget(p, c, r)
+    if CFG.targetPrio == "lowest_hp" then
+        local _, h = getChar(p)
+        return h and h.Health or 9999
+    elseif CFG.targetPrio == "in_crosshair" then
+        local v, on = Camera:WorldToViewportPoint(r.Position)
+        if not on then return 99999 end
+        local vp = Camera.ViewportSize / 2
+        return (Vector2.new(v.X, v.Y) - vp).Magnitude
+    end
+    return (r.Position - root.Position).Magnitude
+end
+
+local function pickTarget(useFov, exclude)
+    if not root then return end
+    local best, bestScore
+    local vp = Camera.ViewportSize / 2
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= exclude and targetable(p) then
+            local c, _, r = getChar(p)
+            if r then
+                local d = (r.Position - root.Position).Magnitude
+                if d <= CFG.camRange then
+                    local score, ok = scoreTarget(p, c, r), true
+                    if useFov then
+                        local v, on = Camera:WorldToViewportPoint(r.Position)
+                        local sd = (Vector2.new(v.X, v.Y) - vp).Magnitude
+                        ok = on and sd <= CFG.fovRadius
+                        score = sd
+                    end
+                    if ok and CFG.camVisible and not isVisible(c, r) then ok = false end
+                    if ok and (not bestScore or score < bestScore) then best, bestScore = p, score end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- base64
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64LOOK = {}
+for i = 1, 64 do B64LOOK[B64:sub(i, i)] = i - 1 end
+local function b64encode(d)
+    local o = {}
+    for i = 1, #d, 3 do
+        local a, b, c = string.byte(d, i, i + 2)
+        local n = a * 65536 + (b or 0) * 256 + (c or 0)
+        local c1 = math.floor(n / 262144) % 64
+        local c2 = math.floor(n / 4096) % 64
+        local c3 = math.floor(n / 64) % 64
+        local c4 = n % 64
+        o[#o + 1] = B64:sub(c1 + 1, c1 + 1) .. B64:sub(c2 + 1, c2 + 1)
+            .. (b and B64:sub(c3 + 1, c3 + 1) or "=") .. (c and B64:sub(c4 + 1, c4 + 1) or "=")
+    end
+    return table.concat(o)
+end
+local function b64decode(s)
+    s = s:gsub("[^%w%+/=]", "")
+    local o = {}
+    for i = 1, #s, 4 do
+        local c1, c2, c3, c4 = s:sub(i, i), s:sub(i + 1, i + 1), s:sub(i + 2, i + 2), s:sub(i + 3, i + 3)
+        local n = (B64LOOK[c1] or 0) * 262144 + (B64LOOK[c2] or 0) * 4096 + (B64LOOK[c3] or 0) * 64 + (B64LOOK[c4] or 0)
+        o[#o + 1] = string.char(math.floor(n / 65536) % 256)
+        if c3 ~= "=" and c3 ~= "" then o[#o + 1] = string.char(math.floor(n / 256) % 256) end
+        if c4 ~= "=" and c4 ~= "" then o[#o + 1] = string.char(n % 256) end
+    end
+    return table.concat(o)
+end
+
+-- ============================================================
+-- GUI
+-- ============================================================
+
+local pg = LP:WaitForChild("PlayerGui")
+local old = pg:FindFirstChild("NexusHvH")
+if old then old:Destroy() end
+local gui = new("ScreenGui", { Name = "NexusHvH", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 100, ZIndexBehavior = Enum.ZIndexBehavior.Sibling }, pg)
+
+local activeDrag, winDrag, listening
+
+-- toast
+local toastBox = new("Frame", { Size = UDim2.fromOffset(280, 400), AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -16, 1, -16), BackgroundTransparency = 1 }, gui)
+new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, VerticalAlignment = Enum.VerticalAlignment.Bottom, Padding = UDim.new(0, 6) }, toastBox)
+local function toast(title, text, color)
+    if not CFG.notifications then return end
+    color = color or T.accent
+    local g = new("CanvasGroup", { Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = T.bg, GroupTransparency = 1, LayoutOrder = nextOrder() }, toastBox)
+    corner(g, 8); stroke(g)
+    new("Frame", { Size = UDim2.new(0, 3, 1, 0), BackgroundColor3 = color, BorderSizePixel = 0 }, g)
+    new("TextLabel", { Size = UDim2.new(1, -16, 0, 18), Position = UDim2.fromOffset(12, 5), BackgroundTransparency = 1, Text = title, TextColor3 = color, Font = Enum.Font.GothamBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left }, g)
+    new("TextLabel", { Size = UDim2.new(1, -16, 0, 16), Position = UDim2.fromOffset(12, 22), BackgroundTransparency = 1, Text = text, TextColor3 = T.text, Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left }, g)
+    tween(g, 0.2, { GroupTransparency = 0 })
+    task.delay(3.2, function()
+        if g.Parent then tween(g, 0.3, { GroupTransparency = 1 }); Debris:AddItem(g, 0.35) end
+    end)
+end
+
+-- kill feed
+local feedBox = new("Frame", { Size = UDim2.fromOffset(360, 220), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -16, 0, 64), BackgroundTransparency = 1 }, gui)
+new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Right, Padding = UDim.new(0, 4) }, feedBox)
+local feedItems = {}
+local function hexOf(p)
+    if p == LP then return T.accent:ToHex() end
+    if isFriend(p) then return "55ff88" end
+    return "e6e8f0"
+end
+local function pushKillFeed(killer, victim)
+    if not CFG.killFeed then return end
+    local mine = killer == LP or victim == LP
+    local text
+    if killer then
+        text = string.format('<font color="#%s">%s</font>  <font color="#8a90a6">➜</font>  <font color="#%s">%s</font>', hexOf(killer), killer.Name, hexOf(victim), victim.Name)
+    else
+        text = string.format('<font color="#8a90a6">☠</font>  <font color="#%s">%s</font>', hexOf(victim), victim.Name)
+    end
+    local g = new("CanvasGroup", { AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.fromOffset(0, 28), BackgroundColor3 = T.bg, GroupTransparency = 1, LayoutOrder = nextOrder() }, feedBox)
+    corner(g, 6)
+    stroke(g, mine and T.accent or T.stroke, mine and 1.5 or 1)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, g)
+    new("TextLabel", { AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0), BackgroundTransparency = 1, RichText = true, Text = text, TextColor3 = T.text, Font = Enum.Font.GothamSemibold, TextSize = 13 }, g)
+    tween(g, 0.2, { GroupTransparency = 0 })
+    table.insert(feedItems, g)
+    if #feedItems > 6 then local o = table.remove(feedItems, 1); if o then o:Destroy() end end
+    task.delay(6, function()
+        if g.Parent then tween(g, 0.4, { GroupTransparency = 1 }); Debris:AddItem(g, 0.45) end
+    end)
+end
+
+-- popup
+local popup = new("CanvasGroup", { Size = UDim2.fromOffset(460, 92), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.27), BackgroundTransparency = 1, GroupTransparency = 1 }, gui)
+local popScale = new("UIScale", {}, popup)
+local popTitle = new("TextLabel", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1, Font = Enum.Font.GothamBlack, TextSize = 34, TextColor3 = T.accent, TextStrokeTransparency = 0.6, RichText = true, Text = "" }, popup)
+local popSub = new("TextLabel", { Size = UDim2.new(1, 0, 0, 28), Position = UDim2.fromOffset(0, 54), BackgroundTransparency = 1, Font = Enum.Font.GothamSemibold, TextSize = 16, TextColor3 = T.text, TextStrokeTransparency = 0.7, Text = "" }, popup)
+local popToken = 0
+local function showPopup(title, sub, color)
+    if not CFG.killPopup then return end
+    popToken = popToken + 1
+    local my = popToken
+    popTitle.Text = title; popTitle.TextColor3 = color or T.accent; popSub.Text = sub or ""
+    popScale.Scale = 0.6; popup.GroupTransparency = 0
+    TweenService:Create(popScale, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+    task.delay(1.9, function()
+        if popToken == my then tween(popup, 0.35, { GroupTransparency = 1 }) end
+    end)
+end
+
+-- watermark
+local wm = new("Frame", { AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.fromOffset(0, 26), Position = UDim2.fromOffset(16, 16), BackgroundColor3 = T.bg }, gui)
+corner(wm, 6); stroke(wm)
+new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, wm)
+local wmLabel = new("TextLabel", { AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0), BackgroundTransparency = 1, RichText = true, Font = Enum.Font.GothamSemibold, TextSize = 12, TextColor3 = T.text, Text = "NEXUS" }, wm)
+
+local openBtn = new("TextButton", { Size = UDim2.fromOffset(28, 28), Position = UDim2.fromOffset(16, 48), BackgroundColor3 = T.bg, Text = "☰", TextColor3 = T.accent, TextSize = 15, Font = Enum.Font.GothamBold }, gui)
+corner(openBtn, 6); stroke(openBtn)
+
+local fovCircle = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 1 }, gui)
+corner(fovCircle, 999)
+local fovStroke = stroke(fovCircle, T.accent, 1.5)
+
+local xhair = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 1 }, gui)
+for _, d in ipairs({ { -12, -1, 8, 2 }, { 4, -1, 8, 2 }, { -1, -12, 2, 8 }, { -1, 4, 2, 8 } }) do
+    new("Frame", { Position = UDim2.fromOffset(d[1], d[2]), Size = UDim2.fromOffset(d[3], d[4]), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, xhair)
+end
+
+-- ============================================================
+-- ЛОГИКА
+-- ============================================================
+
+local lock = { active = false, target = nil }
+local camHeld, flyOn, speedHeld, lastLaunch = false, false, false, 0
+local camThirdActive = false
+local engaged = {}
+
+-- Auto-Mace (HvH из старого скрипта)
+local mace = { active = false, target = nil, stage = "idle", timer = 0, kills = 0, lastHealth = {} }
+
+-- Auto-Crit (из NEXUS v4)
+local crit = { active = false, target = nil, stage = "idle", timer = 0, angle = 0 }
+
+-- HvH
+local antiaim = { ang = 0 }
+local spin360 = { ang = 0 }
+local fakelag = { ghosts = {}, timer = 0 }
+
+local function doAttack(target)
+    local remote = ReplicatedStorage:FindFirstChild("NexusAttack")
+    if remote and remote:IsA("RemoteEvent") then
+        if target then remote:FireServer(target) end
+        return
+    end
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    if tool then pcall(function() tool:Activate() end) end
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+        task.wait(0.02)
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    end)
+end
+
+local function aimAt(pos, a)
+    local cf = CFrame.lookAt(Camera.CFrame.Position, pos)
+    Camera.CFrame = Camera.CFrame:Lerp(cf, math.clamp(a, 0, 1))
+end
+
+local function lockRelease(silent)
+    if lock.active and not silent then toast("TARGET", "lock released", T.dim) end
+    lock.active = false; lock.target = nil
+end
+local function lockAcquire()
+    local t = pickTarget(CFG.camUseFov)
+    if t then
+        lock.active = true; lock.target = t
+        local _, _, r = getChar(t)
+        local d = (r and root) and math.floor((r.Position - root.Position).Magnitude) or 0
+        toast("TARGET LOCKED", t.Name .. "  ·  " .. d .. "m", T.accent)
+        playSound(CFG.maceSoundId, 1.5, 0.5)
+    else
+        toast("TARGET", "no target", T.bad)
+    end
+end
+
+local function lockStep(dt)
+    local t = lock.target
+    local c, _, r = nil, nil, nil
+    if t and targetable(t) then c, _, r = getChar(t) end
+    if not r then
+        if CFG.combatAutoNext and (CFG.camMode == "Toggle" or camHeld) then
+            lock.active = false; lock.target = nil
+            lockAcquire()
+        else
+            lockRelease(true)
+        end
+        return
+    end
+    engaged[t] = os.clock()
+    local part = c:FindFirstChild(CFG.camPart) or r
+    local pos = part.Position + r.AssemblyLinearVelocity * CFG.camPredict
+    aimAt(pos, CFG.camSmooth * dt * 60)
+end
+
+-- ============================================================
+-- AUTO-MACE — HvH из старого скрипта (полёт над игроком, падение, удар, возврат)
+-- ============================================================
+
+-- ступенчатый телепорт (античит-обход)
+local function stepTeleport(targetPos)
+    if not root then return end
+    local startPos = root.Position
+    local delta = targetPos - startPos
+    local distance = delta.Magnitude
+    if distance < 1 then
+        root.CFrame = CFrame.new(targetPos)
+        return
+    end
+    local steps = math.max(1, math.floor(distance / 3))
+    local stepVec = delta / steps
+    for i = 1, steps do
+        if unloaded or not root then return end
+        root.CFrame = CFrame.new(startPos + stepVec * i)
+        RunService.Heartbeat:Wait()
+    end
+end
+
+local function stopMace(silent)
+    if mace.active then
+        mace.active = false
+        mace.target = nil
+        mace.stage = "idle"
+        if not silent then toast("AUTO-MACE", "stopped", T.dim) end
+    end
+end
+
+local function startMace()
+    if not CFG.maceEnabled then return end
+    if mace.active then stopMace() return end
+    local t = pickTarget(false)
+    if not t then toast("AUTO-MACE", "no targets", T.bad) return end
+    mace.target = t
+    mace.active = true
+    mace.stage = "above"
+    mace.timer = 0
+    local _, hum2, hrp = getChar(t)
+    if not hrp then mace.active = false return end
+    stepTeleport(hrp.Position + Vector3.new(0, CFG.maceHeight, 0))
+    mace.lastHealth[t] = hum2.Health
+    mace.stage = "descending"
+    toast("AUTO-MACE", "target: " .. t.Name, T.accent)
+    if CFG.maceSound then playSound(CFG.maceSoundId, 1.3, 0.5) end
+end
+
+local function maceStep(dt)
+    if not mace.active or not mace.target or not root then return end
+    local _, targetHum, targetHrp = getChar(mace.target)
+    if not targetHrp or targetHum.Health <= 0 then
+        mace.kills = mace.kills + 1
+        if CFG.maceSound then playSound(CFG.maceSoundId, 1, 1) end
+        toast("AUTO-MACE", "KILL #" .. mace.kills, T.good)
+        local n = CFG.combatAutoNext and pickTarget(false)
+        if n and n ~= mace.target then
+            mace.target = n
+            mace.stage = "above"
+            mace.timer = 0
+            local _, _, r = getChar(n)
+            if r then
+                stepTeleport(r.Position + Vector3.new(0, CFG.maceHeight, 0))
+                mace.lastHealth[n] = 100
+                mace.stage = "descending"
+            end
+        else
+            stopMace()
+        end
+        return
+    end
+    engaged[mace.target] = os.clock()
+
+    if CFG.maceAim then
+        aimAt(targetHrp.Position, 0.4 * dt * 60)
+    end
+
+    if mace.stage == "descending" then
+        local myPos = root.Position
+        local targetPos = targetHrp.Position + Vector3.new(0, 0.5, 0)
+        local delta = targetPos - myPos
+        local dist = delta.Magnitude
+        if dist <= CFG.maceHitRange then
+            doAttack(mace.target)
+            mace.timer = 0
+            mace.stage = "returning"
+        else
+            local speed = math.max(20, dist / 0.1)
+            root.CFrame = CFrame.new(myPos + delta.Unit * math.min(dist, speed * dt))
+        end
+    end
+
+    if mace.stage == "returning" then
+        mace.timer = mace.timer + dt
+        if mace.timer >= CFG.maceDelay then
+            local _, _, newHrp = getChar(mace.target)
+            if newHrp then
+                stepTeleport(newHrp.Position + Vector3.new(0, CFG.maceHeight, 0))
+                mace.stage = "descending"
+            else
+                stopMace()
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- AUTO-CRIT (подход → прыжок 5 → удар → кружение)
+-- ============================================================
+
+local function stopCrit(silent)
+    if crit.active then
+        crit.active = false
+        crit.target = nil
+        crit.stage = "idle"
+        if not silent then toast("AUTO-CRIT", "stopped", T.dim) end
+    end
+end
+
+local function startCrit()
+    if not CFG.critEnabled then return end
+    if crit.active then stopCrit() return end
+    stopMace(true)
+    local t = pickTarget(false)
+    if not t then toast("AUTO-CRIT", "no targets", T.bad) return end
+    crit.target = t
+    crit.active = true
+    crit.stage = "approach"
+    crit.timer = 0
+    crit.angle = 0
+    toast("AUTO-CRIT", "target: " .. t.Name, T.accent)
+    if CFG.maceSound then playSound(CFG.maceSoundId, 1.3, 0.5) end
+end
+
+local function critStep(dt)
+    if not crit.active or not crit.target or not root or not hum then return end
+    local _, targetHum, targetHrp = getChar(crit.target)
+    if not targetHrp or targetHum.Health <= 0 then
+        local n = CFG.combatAutoNext and pickTarget(false)
+        if n and n ~= crit.target then
+            crit.target = n
+            crit.stage = "approach"
+            crit.timer = 0
+            crit.angle = 0
+        else
+            stopCrit()
+        end
+        return
+    end
+    engaged[crit.target] = os.clock()
+
+    if CFG.critAim then
+        local look = CFrame.lookAt(Camera.CFrame.Position, targetHrp.Position)
+        Camera.CFrame = Camera.CFrame:Lerp(look, math.clamp(0.4 * 60 * dt, 0, 1))
+    end
+
+    if crit.stage == "approach" then
+        local myPos = root.Position
+        local targetPos = targetHrp.Position
+        local delta = targetPos - myPos
+        local dist = delta.Magnitude
+        if dist > 6 then
+            local speed = 45
+            root.CFrame = CFrame.new(myPos + delta.Unit * math.min(dist, speed * dt))
+        else
+            crit.stage = "jump"
+            crit.timer = 0
+        end
+    end
+
+    if crit.stage == "jump" then
+        root.CFrame = root.CFrame + Vector3.new(0, 5, 0)
+        crit.timer = 0
+        crit.stage = "wait"
+    end
+
+    if crit.stage == "wait" then
+        crit.timer = crit.timer + dt
+        if crit.timer >= CFG.critJumpDelay then
+            doAttack(crit.target)
+            crit.stage = "spin"
+            crit.timer = 0
+            crit.angle = 0
+        end
+    end
+
+    if crit.stage == "spin" then
+        crit.timer = crit.timer + dt
+        crit.angle = crit.angle + CFG.critSpinSpeed * dt
+        if crit.timer >= CFG.critSpinTime then
+            local n = CFG.combatAutoNext and pickTarget(false)
+            if n and n ~= crit.target then
+                crit.target = n
+                crit.stage = "approach"
+                crit.timer = 0
+                crit.angle = 0
+            else
+                stopCrit()
+            end
+        else
+            local radius = CFG.critSpinRadius
+            local rad = math.rad(crit.angle)
+            local offset = Vector3.new(math.cos(rad) * radius, 0, math.sin(rad) * radius)
+            local targetPos = targetHrp.Position + offset
+            local delta = targetPos - root.Position
+            root.CFrame = CFrame.new(root.Position + delta * math.clamp(8 * dt, 0, 1))
+            local look = CFrame.lookAt(Camera.CFrame.Position, targetHrp.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(look, math.clamp(0.5 * 60 * dt, 0, 1))
+        end
+    end
+end
+
+-- ============================================================
+-- UNIVERSAL — FOV от 3-го лица
+-- ============================================================
+
+local camThirdPart = new("Part", { Name = "NexusCameraPart", Size = Vector3.new(0.2, 0.2, 0.2), Transparency = 1, CanCollide = false, Anchored = true, CanQuery = false, CanTouch = false, Parent = Workspace })
+
+local function camThirdStep(dt)
+    if not CFG.camThirdEnabled or not root then
+        camThirdPart.Parent = nil
+        return
+    end
+    camThirdPart.Parent = Workspace
+    local basePos = root.Position + Vector3.new(0, CFG.camThirdHeight, 0)
+
+    if CFG.camThirdAim then
+        local t = pickTarget(false)
+        if t then
+            local _, _, r = getChar(t)
+            if r then
+                local dir = (r.Position - basePos).Unit
+                local camPos = basePos - dir * CFG.camThirdRadius
+                camThirdPart.CFrame = CFrame.new(camPos)
+                local look = CFrame.lookAt(camPos, r.Position)
+                Camera.CFrame = Camera.CFrame:Lerp(look, math.clamp(CFG.camThirdSmooth * 60 * dt, 0, 1))
+                return
+            end
+        end
+    end
+    local dir = Camera.CFrame.LookVector
+    local camPos = basePos - dir * CFG.camThirdRadius
+    camThirdPart.CFrame = CFrame.new(camPos)
+    local look = CFrame.lookAt(camPos, basePos + dir)
+    Camera.CFrame = Camera.CFrame:Lerp(look, math.clamp(CFG.camThirdSmooth * 60 * dt, 0, 1))
+end
+
+-- ============================================================
+-- HvH
+-- ============================================================
+
+local function antiaimStep(dt)
+    if not CFG.antiaimEnabled or not hum or hum.Health <= 0 then return end
+    if CFG.antiaimMode == "Jitter" then
+        antiaim.ang = antiaim.ang + CFG.antiaimSpeed * dt * 60
+        local yaw = math.sin(antiaim.ang) * 90
+        pcall(function() root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(yaw), 0) end)
+    elseif CFG.antiaimMode == "Spin" then
+        antiaim.ang = antiaim.ang + CFG.antiaimSpeed * dt * 30
+        pcall(function() root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(antiaim.ang % 360), 0) end)
+    elseif CFG.antiaimMode == "Static" then
+        pcall(function() root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(180), 0) end)
+    end
+end
+
+local fakelagGhosts = {}
+local function clearFakelagGhosts()
+    for _, g in ipairs(fakelagGhosts) do if g.Part then g.Part:Destroy() end end
+    fakelagGhosts = {}
+end
+
+local function fakelagStep(dt)
+    if not CFG.fakelagEnabled then
+        if #fakelagGhosts > 0 then clearFakelagGhosts() end
+        return
+    end
+    if not root then return end
+    fakelag.timer = fakelag.timer + dt
+    if fakelag.timer >= CFG.fakelagAmount then
+        fakelag.timer = 0
+        if CFG.fakelagViz then
+            local g = new("Part", {
+                Size = Vector3.new(2, 5, 1),
+                CFrame = root.CFrame,
+                Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
+                Transparency = 0.6,
+                Color = Color3.fromHex(CFG.fakelagVizColor),
+                Material = Enum.Material.Neon,
+                Parent = Workspace
+            })
+            table.insert(fakelagGhosts, { Part = g, Time = os.clock() })
+        end
+    end
+    local now = os.clock()
+    for i = #fakelagGhosts, 1, -1 do
+        local ghost = fakelagGhosts[i]
+        if now - ghost.Time > 1.5 then
+            if ghost.Part then ghost.Part:Destroy() end
+            table.remove(fakelagGhosts, i)
+        else
+            local alpha = 1 - (now - ghost.Time) / 1.5
+            if ghost.Part then ghost.Part.Transparency = 1 - alpha * 0.4 end
+        end
+    end
+end
+
+local function autododgeStep(dt)
+    if not CFG.autododgeEnabled or not root then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and targetable(p) then
+            local _, _, r = getChar(p)
+            if r then
+                local delta = root.Position - r.Position
+                local dist = delta.Magnitude
+                if dist < CFG.autododgeRange and dist > 0.1 then
+                    root.CFrame = root.CFrame + delta.Unit * (CFG.autododgeRange - dist) * dt * 3
+                end
+            end
+        end
+    end
+end
+
+local function spin360Step(dt)
+    if not CFG.spin360Enabled then return end
+    spin360.ang = spin360.ang + CFG.spin360Speed * dt
+    Camera.CFrame = CFrame.Angles(0, math.rad(spin360.ang), 0) * CFrame.new(0, 0, 10)
+end
+
+-- movement
+local function movementStep(dt)
+    if flyOn and CFG.flyEnabled then
+        if not UIS:GetFocusedTextBox() then
+            local cf = Camera.CFrame
+            local function k(code) return UIS:IsKeyDown(code) and 1 or 0 end
+            local f = k(Enum.KeyCode.W) - k(Enum.KeyCode.S)
+            local rr = k(Enum.KeyCode.D) - k(Enum.KeyCode.A)
+            local u = k(Enum.KeyCode.Space) - k(Enum.KeyCode.LeftControl)
+            local dir = cf.LookVector * f + cf.RightVector * rr + Vector3.yAxis * u
+            root.AssemblyLinearVelocity = dir.Magnitude > 0 and dir.Unit * CFG.flySpeed or Vector3.zero
+        end
+    elseif CFG.speedEnabled and speedHeld then
+        local extra = math.max(0, CFG.speedValue - hum.WalkSpeed)
+        if hum.MoveDirection.Magnitude > 0 and extra > 0 then
+            root.CFrame = root.CFrame + hum.MoveDirection * extra * dt
+        end
+    end
+    if CFG.bhop and UIS:IsKeyDown(Enum.KeyCode.Space) and not UIS:GetFocusedTextBox() and hum.FloorMaterial ~= Enum.Material.Air then
+        hum.Jump = true
+    end
+end
+
+local function doLaunch()
+    if not CFG.launchEnabled or not root or not hum or hum.Health <= 0 then return end
+    if os.clock() - lastLaunch < CFG.launchCooldown then return end
+    lastLaunch = os.clock()
+    local v = root.AssemblyLinearVelocity
+    root.AssemblyLinearVelocity = Vector3.new(v.X, CFG.launchPower, v.Z)
+end
+
+local function onDeath(p, h)
+    if unloaded then return end
+    local killer
+    local tag = h:FindFirstChild("creator")
+    if tag and tag:IsA("ObjectValue") and typeof(tag.Value) == "Instance" and tag.Value:IsA("Player") then killer = tag.Value end
+    if not killer and p ~= LP and engaged[p] and os.clock() - engaged[p] < 1.2 then killer = LP end
+    if killer == p then killer = nil end
+    pushKillFeed(killer, p)
+    if killer == LP and p ~= LP then showPopup("ELIMINATED", p.Name, T.accent) end
+end
+local function hookPlayer(p)
+    local function onChar(c)
+        local h = c:WaitForChild("Humanoid", 10)
+        if h then h.Died:Connect(function() onDeath(p, h) end) end
+    end
+    track(p.CharacterAdded:Connect(function(c) task.spawn(onChar, c) end))
+    if p.Character then task.spawn(onChar, p.Character) end
+end
+
+local esp = {}
+local function clearEsp(p)
+    local e = esp[p]
+    if e then
+        if e.hl then e.hl:Destroy() end
+        if e.bb then e.bb:Destroy() end
+        esp[p] = nil
+    end
+end
+local function espStep()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            local c, h, r = getChar(p)
+            if CFG.espEnabled and c then
+                local e = esp[p]
+                if not e or e.char ~= c then
+                    clearEsp(p)
+                    e = { char = c }
+                    esp[p] = e
+                    e.hl = new("Highlight", { Adornee = c, FillTransparency = 0.75, OutlineTransparency = 0, DepthMode = Enum.HighlightDepthMode.AlwaysOnTop }, c)
+                    e.bb = new("BillboardGui", { Adornee = r, AlwaysOnTop = true, Size = UDim2.fromOffset(160, 28), StudsOffset = Vector3.new(0, -3.4, 0), MaxDistance = 1500, LightInfluence = 0 }, gui)
+                    e.txt = new("TextLabel", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, RichText = true, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = Color3.new(1, 1, 1), TextStrokeTransparency = 0.4 }, e.bb)
+                end
+                local col = isFriend(p) and Color3.fromHex("55ff88") or Color3.fromHex(CFG.espColor)
+                e.hl.Enabled = CFG.espBoxes
+                e.hl.FillColor = col; e.hl.OutlineColor = col
+                e.bb.Enabled = CFG.espNames
+                e.txt.Text = string.format('%s  <font color="#55ff88">%d</font>', p.Name, math.floor(h.Health))
+            else
+                clearEsp(p)
+            end
+        end
+    end
+end
+
+local markers = {}
+local function destroyMarker(l)
+    local m = markers[l]
+    if m then m.gui:Destroy(); markers[l] = nil end
+end
+local function makeMarker(entry, hrp)
+    local color = Color3.fromHex(entry.color)
+    local g = new("BillboardGui", { Adornee = hrp, AlwaysOnTop = true, Size = UDim2.fromOffset(160, 48), StudsOffset = Vector3.new(0, 3.6, 0), MaxDistance = math.huge, LightInfluence = 0 }, gui)
+    local icon = new("Frame", { Size = UDim2.fromOffset(12, 12), Position = UDim2.new(0.5, -6, 0, 2), Rotation = 45, BackgroundColor3 = color, BorderSizePixel = 0 }, g)
+    local name = new("TextLabel", { Size = UDim2.new(1, 0, 0, 16), Position = UDim2.fromOffset(0, 17), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = color, TextStrokeTransparency = 0.5 }, g)
+    local dist = new("TextLabel", { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 32), BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = T.text, TextStrokeTransparency = 0.5 }, g)
+    return { gui = g, hrp = hrp, icon = icon, name = name, dist = dist }
+end
+local function syncMarkers()
+    local alive = {}
+    if CFG.friendMarkers then
+        for _, e in ipairs(CFG.friends) do
+            local l = e.name:lower()
+            local p = findPlayerByName(e.name)
+            local r = p and p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            if p and r then
+                alive[l] = true
+                local m = markers[l]
+                if not m or m.hrp ~= r then destroyMarker(l); m = makeMarker(e, r); markers[l] = m end
+                local col = Color3.fromHex(e.color)
+                m.icon.BackgroundColor3 = col; m.name.TextColor3 = col
+                m.name.Text = e.tag ~= "" and (e.tag .. " · " .. p.Name) or p.Name
+            end
+        end
+    end
+    for l in pairs(markers) do if not alive[l] then destroyMarker(l) end end
+end
+local function markerStep()
+    for _, m in pairs(markers) do
+        if m.hrp and m.hrp.Parent then
+            local d = (Camera.CFrame.Position - m.hrp.Position).Magnitude
+            local a = math.clamp((d - 12) / (250 - 12), 0, 1)
+            local tr = math.min(CFG.markerFade, 0.95) * (1 - a)
+            m.icon.BackgroundTransparency = tr
+            m.name.TextTransparency = tr; m.name.TextStrokeTransparency = math.min(1, 0.5 + tr * 0.5)
+            m.dist.TextTransparency = tr; m.dist.TextStrokeTransparency = math.min(1, 0.5 + tr * 0.5)
+            m.dist.Text = math.floor(d) .. " m"
+        end
+    end
+end
+
+-- ============================================================
+-- МЕНЮ
+-- ============================================================
+
+local main = new("Frame", {
+    Size = UDim2.fromOffset(880, 560),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    BackgroundColor3 = T.bg,
+    Visible = false, Active = true
+}, gui)
+corner(main, 14); stroke(main, T.stroke, 1)
+local mainScale = new("UIScale", {}, main)
+
+local function setMenu(open)
+    if open then
+        main.Visible = true
+        mainScale.Scale = 0.94
+        TweenService:Create(mainScale, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+    else
+        main.Visible = false
+    end
+end
+
+local header = new("Frame", { Size = UDim2.new(1, 0, 0, 48), BackgroundColor3 = T.panel, BorderSizePixel = 0 }, main)
+corner(header, 14)
+new("Frame", { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 1, -14), BackgroundColor3 = T.panel, BorderSizePixel = 0 }, header)
+new("UIGradient", { Color = ColorSequence.new(Color3.fromRGB(26, 30, 44), Color3.fromRGB(20, 21, 27)) }, header)
+new("TextLabel", {
+    Size = UDim2.new(1, -80, 1, 0), Position = UDim2.fromOffset(20, 0),
+    BackgroundTransparency = 1, RichText = true, Font = Enum.Font.GothamBlack, TextSize = 18,
+    TextColor3 = T.text, TextXAlignment = Enum.TextXAlignment.Left,
+    Text = '<font color="#' .. T.accent:ToHex() .. '">NEXUS</font>  <font color="#8a90a6">v5</font>'
+}, header)
+
+local closeBtn = new("TextButton", { Size = UDim2.fromOffset(32, 32), Position = UDim2.new(1, -44, 0, 8), BackgroundColor3 = T.item, Text = "✕", TextColor3 = T.dim, TextSize = 14, Font = Enum.Font.GothamBold }, header)
+corner(closeBtn, 8)
+closeBtn.MouseButton1Click:Connect(function() setMenu(false) end)
+header.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        local startMouse, startPos = i.Position, main.Position
+        winDrag = function(pos)
+            local d = pos - startMouse
+            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end
+end)
+
+local sidebar = new("Frame", { Size = UDim2.new(0, 170, 1, -48), Position = UDim2.fromOffset(0, 48), BackgroundTransparency = 1 }, main)
+new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, sidebar)
+new("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 6), PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12) }, sidebar)
+local pageHolder = new("Frame", { Size = UDim2.new(1, -190, 1, -72), Position = UDim2.fromOffset(182, 60), BackgroundTransparency = 1 }, main)
+
+local pages, tabBtns = {}, {}
+local function selectTab(name)
+    for n, p in pairs(pages) do p.Visible = (n == name) end
+    for n, t in pairs(tabBtns) do
+        local on = n == name
+        t.btn.BackgroundColor3 = on and T.accent or T.item
+        t.btn.TextColor3 = on and Color3.new(1, 1, 1) or T.dim
+    end
+end
+local function addTab(name)
+    local b = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = T.item, BorderSizePixel = 0,
+        AutoButtonColor = false, Text = "  " .. name, TextColor3 = T.dim,
+        TextSize = 13, Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = nextOrder()
+    }, sidebar)
+    corner(b, 8)
+    local p = new("ScrollingFrame", {
+        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
+        ScrollBarThickness = 4, ScrollBarImageColor3 = T.stroke,
+        CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false
+    }, pageHolder)
+    new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10) }, p)
+    new("UIPadding", { PaddingRight = UDim.new(0, 10) }, p)
+    pages[name] = p; tabBtns[name] = { btn = b }
+    b.MouseButton1Click:Connect(function() selectTab(name) end)
+    return p
+end
+
+local function section(page, text)
+    local l = new("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1,
+        Text = text, TextColor3 = T.accent, TextSize = 13,
+        Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left,
+        LayoutOrder = nextOrder()
+    }, page)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 4), PaddingTop = UDim.new(0, 8) }, l)
+end
+
+local function row(page, h)
+    local f = new("Frame", { Size = UDim2.new(1, 0, 0, h or 42), BackgroundColor3 = T.item, BorderSizePixel = 0, LayoutOrder = nextOrder() }, page)
+    corner(f, 8)
+    return f
+end
+local function rowLabel(f, text)
+    return new("TextLabel", { Size = UDim2.new(0.65, 0, 1, 0), Position = UDim2.fromOffset(16, 0), BackgroundTransparency = 1, Text = text, TextColor3 = T.text, TextSize = 13, Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left }, f)
+end
+
+local function toggle(page, label, key, onChange)
+    local f = row(page, 42)
+    rowLabel(f, label)
+    local sw = new("TextButton", { Size = UDim2.fromOffset(48, 24), Position = UDim2.new(1, -64, 0.5, -12), Text = "", AutoButtonColor = false, BackgroundColor3 = T.panel }, f)
+    corner(sw, 12)
+    local knob = new("Frame", { Size = UDim2.fromOffset(18, 18), Position = UDim2.fromOffset(3, 3), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, sw)
+    corner(knob, 9)
+    local function paint(anim)
+        local on = CFG[key]
+        local props1 = { BackgroundColor3 = on and T.accent or T.panel }
+        local props2 = { Position = on and UDim2.fromOffset(27, 3) or UDim2.fromOffset(3, 3) }
+        if anim then tween(sw, 0.15, props1); tween(knob, 0.15, props2) else sw.BackgroundColor3 = props1.BackgroundColor3; knob.Position = props2.Position end
+    end
+    paint(false)
+    sw.MouseButton1Click:Connect(function()
+        CFG[key] = not CFG[key]; paint(true)
+        if onChange then onChange(CFG[key]) end
+    end)
+    controls[key] = function(v) CFG[key] = v; paint(false); if onChange then onChange(v) end end
+end
+
+local function slider(page, label, key, mn, mx, step, onChange)
+    local f = row(page, 58)
+    new("TextLabel", { Size = UDim2.new(0.65, 0, 0, 24), Position = UDim2.fromOffset(16, 6), BackgroundTransparency = 1, Text = label, TextColor3 = T.text, TextSize = 13, Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left }, f)
+    local val = new("TextLabel", { Size = UDim2.new(0.3, 0, 0, 24), Position = UDim2.new(0.7, -16, 0, 6), BackgroundTransparency = 1, TextColor3 = T.accent, TextSize = 13, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Right }, f)
+    local track = new("Frame", { Size = UDim2.new(1, -32, 0, 8), Position = UDim2.fromOffset(16, 40), BackgroundColor3 = T.panel, BorderSizePixel = 0 }, f)
+    corner(track, 4)
+    local fill = new("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = T.accent, BorderSizePixel = 0 }, track)
+    corner(fill, 4)
+    local knob = new("Frame", { Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, track)
+    corner(knob, 8)
+    local hit = new("TextButton", { Size = UDim2.new(1, -32, 0, 26), Position = UDim2.fromOffset(16, 30), BackgroundTransparency = 1, Text = "" }, f)
+    local function fmt(v) if step >= 1 then return tostring(math.floor(v + 0.5)) end return string.format("%.2f", v) end
+    local function setValue(v, fire)
+        v = math.clamp(math.floor(v / step + 0.5) * step, mn, mx)
+        CFG[key] = v
+        local r = (v - mn) / (mx - mn)
+        fill.Size = UDim2.new(r, 0, 1, 0); knob.Position = UDim2.new(r, -8, 0.5, -8); val.Text = fmt(v)
+        if fire and onChange then onChange(v) end
+    end
+    setValue(CFG[key], false)
+    hit.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            activeDrag = function(x)
+                local r = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+                setValue(mn + r * (mx - mn), true)
+            end
+            activeDrag(i.Position.X)
+        end
+    end)
+    controls[key] = function(v) setValue(v, true) end
+end
+
+local function dropdown(page, label, key, options, onChange)
+    local f = row(page, 42)
+    rowLabel(f, label)
+    local b = new("TextButton", { Size = UDim2.fromOffset(150, 28), Position = UDim2.new(1, -166, 0.5, -14), BackgroundColor3 = T.panel, TextColor3 = T.text, TextSize = 12, Font = Enum.Font.GothamBold, AutoButtonColor = true }, f)
+    corner(b, 6)
+    local function paint() b.Text = tostring(CFG[key]) .. "  ▾" end
+    paint()
+    b.MouseButton1Click:Connect(function()
+        local idx = 1
+        for i, o in ipairs(options) do if o == CFG[key] then idx = i break end end
+        CFG[key] = options[idx % #options + 1]; paint()
+        if onChange then onChange(CFG[key]) end
+    end)
+    controls[key] = function(v) CFG[key] = v; paint(); if onChange then onChange(v) end end
+end
+
+local function keybind(page, label, key)
+    local f = row(page, 42)
+    rowLabel(f, label)
+    local b = new("TextButton", { Size = UDim2.fromOffset(150, 28), Position = UDim2.new(1, -166, 0.5, -14), BackgroundColor3 = T.panel, TextColor3 = T.text, TextSize = 12, Font = Enum.Font.GothamBold }, f)
+    corner(b, 6)
+    local function paint() b.Text = "[ " .. CFG[key] .. " ]" end
+    paint()
+    b.MouseButton1Click:Connect(function()
+        b.Text = "[ ... ]"
+        listening = function(kc)
+            if kc ~= Enum.KeyCode.Escape then CFG[key] = kc.Name end
+            paint()
+        end
+    end)
+    controls[key] = function(v) CFG[key] = v; paint() end
+end
+
+local function colorPick(page, label, key)
+    local f = row(page, 42)
+    rowLabel(f, label)
+    local b = new("TextButton", { Size = UDim2.fromOffset(56, 26), Position = UDim2.new(1, -72, 0.5, -13), Text = "", AutoButtonColor = true }, f)
+    corner(b, 6)
+    local function paint() b.BackgroundColor3 = Color3.fromHex(CFG[key]) end
+    paint()
+    b.MouseButton1Click:Connect(function()
+        local idx = 0
+        for i, c in ipairs(PALETTE) do if c == CFG[key] then idx = i break end end
+        CFG[key] = PALETTE[idx % #PALETTE + 1]; paint()
+    end)
+    controls[key] = function(v) CFG[key] = v; paint() end
+end
+
+local function button(page, text, cb, color)
+    local b = new("TextButton", { Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = color or T.panel, Text = text, TextColor3 = T.text, TextSize = 13, Font = Enum.Font.GothamBold, LayoutOrder = nextOrder() }, page)
+    corner(b, 8); stroke(b)
+    b.MouseButton1Click:Connect(cb)
+    return b
+end
+
+local function textInput(page, placeholder, btnText, onEnter)
+    local f = row(page, 48)
+    local box = new("TextBox", { Size = UDim2.new(1, -140, 0, 32), Position = UDim2.fromOffset(12, 8), BackgroundColor3 = T.panel, Text = "", PlaceholderText = placeholder, PlaceholderColor3 = T.dim, TextColor3 = T.text, TextSize = 13, Font = Enum.Font.Gotham, ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, f)
+    corner(box, 6)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 10) }, box)
+    local btn = new("TextButton", { Size = UDim2.fromOffset(118, 32), Position = UDim2.new(1, -128, 0, 8), BackgroundColor3 = T.accent, Text = btnText, TextColor3 = Color3.new(1, 1, 1), TextSize = 13, Font = Enum.Font.GothamBold }, f)
+    corner(btn, 6)
+    btn.MouseButton1Click:Connect(function() onEnter(box.Text, box) end)
+    box.FocusLost:Connect(function(enter) if enter then onEnter(box.Text, box) end end)
+    return box
+end
+
+-- ============================================================
+-- ВКЛАДКИ
+-- ============================================================
+
+local pUni = addTab(L("tab_universal"))
+local pCombat = addTab(L("tab_combat"))
+local pMace = addTab(L("tab_mace"))
+local pHvH = addTab(L("tab_hvh"))
+local pVis = addTab(L("tab_visuals"))
+local pFriends = addTab(L("tab_friends"))
+local pCfg = addTab(L("tab_config"))
+local pUI = addTab(L("tab_ui"))
+
+-- UNIVERSAL
+section(pUni, L("fov_third"))
+toggle(pUni, L("fov_third"), "camThirdEnabled", function(v) if not v then camThirdPart.Parent = nil end end)
+keybind(pUni, L("key"), "camThirdKey")
+slider(pUni, L("fov_third_radius"), "camThirdRadius", 5, 100, 1)
+slider(pUni, L("fov_third_height"), "camThirdHeight", 0, 20, 0.5)
+toggle(pUni, L("fov_third_aim"), "camThirdAim")
+slider(pUni, L("smooth"), "camThirdSmooth", 0.05, 1, 0.01)
+
+-- COMBAT
+section(pCombat, "Cam Lock")
+toggle(pCombat, "Cam Lock", "camEnabled", function(v) if not v then lockRelease(true) end end)
+dropdown(pCombat, L("mode"), "camMode", { "Hold", "Toggle" })
+keybind(pCombat, L("key"), "camKey")
+dropdown(pCombat, L("target"), "camPart", { "Head", "HumanoidRootPart" })
+slider(pCombat, L("smooth"), "camSmooth", 0.05, 1, 0.01)
+slider(pCombat, L("predict"), "camPredict", 0, 0.3, 0.01)
+slider(pCombat, L("max_dist"), "camRange", 50, 2000, 50)
+toggle(pCombat, "Use FOV", "camUseFov")
+toggle(pCombat, "Visible only", "camVisible")
+toggle(pCombat, "Ignore team", "camIgnoreTeam")
+dropdown(pCombat, L("target_prio"), "targetPrio", { "closest", "lowest_hp", "in_crosshair" })
+toggle(pCombat, L("auto_next"), "combatAutoNext")
+button(pCombat, L("reset_target"), function() lockRelease() end)
+
+section(pCombat, "Movement")
+toggle(pCombat, L("speed"), "speedEnabled")
+keybind(pCombat, L("key") .. " speed", "speedKey")
+slider(pCombat, L("speed"), "speedValue", 16, 200, 1)
+toggle(pCombat, L("launch"), "launchEnabled")
+keybind(pCombat, L("key") .. " launch", "launchKey")
+slider(pCombat, "Power", "launchPower", 30, 250, 5)
+slider(pCombat, "Cooldown", "launchCooldown", 0.1, 2, 0.05)
+toggle(pCombat, L("bhop"), "bhop")
+toggle(pCombat, L("fly"), "flyEnabled", function(v) if not v then flyOn = false end end)
+keybind(pCombat, L("key") .. " fly", "flyKey")
+slider(pCombat, L("fly_speed"), "flySpeed", 20, 200, 1)
+
+-- AUTO-MACE — ВОТ ОНА, вкладка с HvH из старого скрипта
+section(pMace, "Auto-Mace (HvH — полёт над игроком)")
+toggle(pMace, L("enabled"), "maceEnabled", function(v) if not v then stopMace(true) end end)
+keybind(pMace, L("key"), "maceKey")
+slider(pMace, L("mace_height"), "maceHeight", 1, 999, 1)
+slider(pMace, L("mace_hit_dist"), "maceHitRange", 3, 15, 0.5)
+slider(pMace, L("mace_delay"), "maceDelay", 0.05, 0.5, 0.01)
+toggle(pMace, "Автоприцел", "maceAim")
+toggle(pMace, "Звук", "maceSound")
+button(pMace, L("mace_start"), startMace)
+
+section(pMace, "Auto-Crit (прыжок + кружение)")
+toggle(pMace, L("enabled") .. " crit", "critEnabled", function(v) if not v then stopCrit(true) end end)
+keybind(pMace, L("key") .. " crit", "critKey")
+slider(pMace, "Задержка удара", "critJumpDelay", 0.05, 2.0, 0.05)
+slider(pMace, "Скорость кружения", "critSpinSpeed", 50, 800, 25)
+slider(pMace, "Время кружения", "critSpinTime", 0.1, 2, 0.1)
+slider(pMace, "Радиус кружения", "critSpinRadius", 3, 10, 0.5)
+toggle(pMace, "Автоприцел", "critAim")
+button(pMace, L("crit_start"), startCrit)
+
+-- HVH
+section(pHvH, L("antiaim"))
+toggle(pHvH, L("antiaim"), "antiaimEnabled")
+dropdown(pHvH, L("antiaim_mode"), "antiaimMode", { "Jitter", "Spin", "Static" })
+slider(pHvH, L("antiaim_speed"), "antiaimSpeed", 1, 30, 1)
+section(pHvH, L("fakelag"))
+toggle(pHvH, L("fakelag"), "fakelagEnabled")
+slider(pHvH, L("fakelag_amount"), "fakelagAmount", 0.01, 0.2, 0.01)
+toggle(pHvH, L("fakelag_viz"), "fakelagViz")
+colorPick(pHvH, L("fakelag_viz_color"), "fakelagVizColor")
+section(pHvH, L("autododge"))
+toggle(pHvH, L("autododge"), "autododgeEnabled")
+slider(pHvH, L("autododge_range"), "autododgeRange", 5, 50, 1)
+section(pHvH, L("spin360"))
+toggle(pHvH, L("spin360"), "spin360Enabled")
+slider(pHvH, L("spin360_speed"), "spin360Speed", 100, 1000, 25)
+
+-- VISUALS
+section(pVis, "ESP")
+toggle(pVis, L("esp"), "espEnabled")
+toggle(pVis, L("esp_box"), "espBoxes")
+toggle(pVis, L("esp_name"), "espNames")
+colorPick(pVis, L("esp_color"), "espColor")
+section(pVis, "FOV / " .. L("crosshair"))
+toggle(pVis, L("fov_circle"), "fovShow")
+slider(pVis, "Radius", "fovRadius", 50, 800, 10)
+colorPick(pVis, "Color", "fovColor")
+toggle(pVis, L("crosshair"), "crosshair")
+section(pVis, "Kills")
+toggle(pVis, L("killfeed"), "killFeed")
+toggle(pVis, L("killpopup"), "killPopup")
+toggle(pVis, "Kill sound", "killSound")
+toggle(pVis, "Notifications", "notifications")
+section(pVis, "World")
+toggle(pVis, L("fullbright"), "fullbright")
+toggle(pVis, L("custom_fov"), "customFov")
+slider(pVis, L("fov_val"), "camFov", 40, 120, 1)
+
+-- FRIENDS
+local friendList
+local refreshFriends
+local function addFriend(name, box)
+    name = (name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then return end
+    local p = findPlayerByName(name)
+    local canon = p and p.Name or name
+    for _, e in ipairs(CFG.friends) do
+        if e.name:lower() == canon:lower() then toast("FRIENDS", canon .. " already added", T.dim) return end
+    end
+    table.insert(CFG.friends, { name = canon, tag = "FRIEND", color = PALETTE[1] })
+    rebuildFriendSet(); refreshFriends(); syncMarkers()
+    if lock.target and isFriend(lock.target) then lockRelease(true) end
+    if box then box.Text = "" end
+end
+section(pFriends, L("add_friend"))
+textInput(pFriends, "nickname...", "Add", addFriend)
+toggle(pFriends, "Friend markers", "friendMarkers", function() syncMarkers() end)
+slider(pFriends, "Near fade", "markerFade", 0.2, 0.9, 0.01)
+friendList = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, LayoutOrder = nextOrder() }, pFriends)
+new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, friendList)
+
+refreshFriends = function()
+    for _, c in ipairs(friendList:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+    for i, e in ipairs(CFG.friends) do
+        local f = new("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = T.item, BorderSizePixel = 0, LayoutOrder = i }, friendList)
+        corner(f, 8)
+        local sw = new("TextButton", { Size = UDim2.fromOffset(26, 26), Position = UDim2.fromOffset(10, 9), BackgroundColor3 = Color3.fromHex(e.color), Text = "" }, f)
+        corner(sw, 13)
+        sw.MouseButton1Click:Connect(function()
+            local idx = 0
+            for k, c in ipairs(PALETTE) do if c == e.color then idx = k break end end
+            e.color = PALETTE[idx % #PALETTE + 1]
+            sw.BackgroundColor3 = Color3.fromHex(e.color); syncMarkers()
+        end)
+        new("TextLabel", { Size = UDim2.fromOffset(140, 44), Position = UDim2.fromOffset(46, 0), BackgroundTransparency = 1, Text = e.name, TextColor3 = findPlayerByName(e.name) and T.text or T.dim, TextSize = 13, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, f)
+        local tag = new("TextBox", { Size = UDim2.new(1, -270, 0, 28), Position = UDim2.fromOffset(196, 8), BackgroundColor3 = T.panel, Text = e.tag, PlaceholderText = "tag", PlaceholderColor3 = T.dim, TextColor3 = T.text, TextSize = 12, Font = Enum.Font.Gotham, ClearTextOnFocus = false }, f)
+        corner(tag, 6)
+        tag.FocusLost:Connect(function() e.tag = tag.Text:sub(1, 14); syncMarkers() end)
+        local del = new("TextButton", { Size = UDim2.fromOffset(64, 28), Position = UDim2.new(1, -74, 0, 8), BackgroundColor3 = T.bad, Text = L("delete"), TextColor3 = Color3.new(1, 1, 1), TextSize = 12, Font = Enum.Font.GothamBold }, f)
+        corner(del, 6)
+        del.MouseButton1Click:Connect(function()
+            table.remove(CFG.friends, i)
+            rebuildFriendSet(); refreshFriends(); syncMarkers()
+        end)
+    end
+end
+refreshFriends()
+
+-- CONFIG
+local function exportCfg()
+    local d = {}
+    for k, v in pairs(CFG) do
+        if k == "friends" then
+            if #v > 0 then d.friends = v end
+        elseif v ~= DEFAULTS[k] then
+            d[k] = v
+        end
+    end
+    return "NXS5:" .. b64encode(HttpService:JSONEncode(d))
+end
+local function applyCfg(data)
+    if type(data) ~= "table" then return false end
+    for k, v in pairs(data) do
+        if k == "friends" then
+            if type(v) == "table" then
+                CFG.friends = {}
+                for _, e in ipairs(v) do
+                    if type(e) == "table" and type(e.name) == "string" then
+                        local col = PALETTE[1]
+                        if type(e.color) == "string" and pcall(Color3.fromHex, e.color) then col = e.color end
+                        table.insert(CFG.friends, { name = e.name:sub(1, 20), tag = tostring(e.tag or "FRIEND"):sub(1, 14), color = col })
+                    end
+                end
+                rebuildFriendSet(); refreshFriends(); syncMarkers()
+            end
+        elseif DEFAULTS[k] ~= nil and type(v) == type(DEFAULTS[k]) and controls[k] then
+            if k:sub(-3) == "Key" then
+                local ok, kc = pcall(function() return Enum.KeyCode[v] end)
+                if ok and kc then controls[k](v) end
+            elseif k:sub(-5) == "Color" then
+                if pcall(Color3.fromHex, v) then controls[k](v) end
+            else
+                controls[k](v)
+            end
+        end
+    end
+    return true
+end
+local function importCfg(str)
+    str = (str or ""):gsub("%s+", "")
+    if str:sub(1, 5) ~= "NXS5:" then return false end
+    local ok, json = pcall(b64decode, str:sub(6))
+    if not ok then return false end
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, json)
+    if not ok2 or type(data) ~= "table" then return false end
+    local base = copyTable(DEFAULTS); base.friends = nil
+    applyCfg(base)
+    if type(data.friends) ~= "table" then data.friends = {} end
+    return applyCfg(data)
+end
+
+section(pCfg, "Config (base64)")
+local cfgBox
+cfgBox = textInput(pCfg, "paste NXS5:... and press Import", L("import"), function(text)
+    if importCfg(text) then toast("CONFIG", "loaded", T.good) else toast("CONFIG", "invalid", T.bad) end
+end)
+button(pCfg, L("export") .. " → code", function() cfgBox.Text = exportCfg() end)
+button(pCfg, L("reset_cfg"), function()
+    local base = copyTable(DEFAULTS); base.friends = nil
+    applyCfg(base)
+end)
+section(pCfg, "Menu")
+keybind(pCfg, L("menu_key"), "menuKey")
+
+-- UI
+section(pUI, "Language")
+local langRow = row(pUI, 42)
+rowLabel(langRow, L("language"))
+local langBtn = new("TextButton", { Size = UDim2.fromOffset(150, 28), Position = UDim2.new(1, -166, 0.5, -14), BackgroundColor3 = T.panel, Text = CFG.lang == "ru" and "Русский" or "English", TextColor3 = T.text, TextSize = 13, Font = Enum.Font.GothamBold }, langRow)
+corner(langBtn, 6)
+langBtn.MouseButton1Click:Connect(function()
+    CFG.lang = CFG.lang == "ru" and "en" or "ru"
+    LANG = CFG.lang
+    toast("LANG", "Reload for full apply", T.accent)
+end)
+
+local fullbrightSaved
+local function unload()
+    unloaded = true
+    stopMace(true); stopCrit(true); lockRelease(true)
+    clearFakelagGhosts()
+    pcall(function() RunService:UnbindFromRenderStep("NexusMain") end)
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    for p in pairs(esp) do clearEsp(p) end
+    if fullbrightSaved then for k, v in pairs(fullbrightSaved) do Lighting[k] = v end end
+    camThirdPart:Destroy()
+    gui:Destroy()
+end
+button(pCfg, L("unload"), unload, Color3.fromRGB(70, 28, 34))
+
+-- ============================================================
+-- ВВОД
+-- ============================================================
+
+track(UIS.InputBegan:Connect(function(input, gp)
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if listening then
+        local cb = listening; listening = nil
+        cb(input.KeyCode)
+        return
+    end
+    if unloaded then return end
+    if CFG.menuKey == input.KeyCode.Name then
+        if main.Visible then setMenu(false) else setMenu(true) end
+        return
+    end
+    if gp then return end
+
+    if CFG.maceKey == input.KeyCode.Name then
+        if mace.active then stopMace() else startMace() end
+    end
+    if CFG.critKey == input.KeyCode.Name then
+        if crit.active then stopCrit() else startCrit() end
+    end
+    if CFG.camKey == input.KeyCode.Name and CFG.camEnabled then
+        if CFG.camMode == "Hold" then camHeld = true; lockAcquire()
+        else if lock.active then lockRelease() else lockAcquire() end end
+    end
+    if CFG.speedKey == input.KeyCode.Name and CFG.speedEnabled then speedHeld = true end
+    if CFG.launchKey == input.KeyCode.Name and CFG.launchEnabled then doLaunch() end
+    if CFG.flyKey == input.KeyCode.Name and CFG.flyEnabled then
+        flyOn = not flyOn
+        toast("FLY", flyOn and "on" or "off", flyOn and T.good or T.dim)
+    end
+    if CFG.camThirdKey == input.KeyCode.Name then
+        CFG.camThirdEnabled = not CFG.camThirdEnabled
+        if not CFG.camThirdEnabled then camThirdPart.Parent = nil end
+        toast("CAM", CFG.camThirdEnabled and "3rd person" or "normal", T.accent)
+    end
+end))
+
+track(UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        activeDrag = nil; winDrag = nil
+    end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if CFG.camKey == input.KeyCode.Name and CFG.camMode == "Hold" then
+        camHeld = false; lockRelease(true)
+    end
+    if CFG.speedKey == input.KeyCode.Name then
+        speedHeld = false
+        if hum then hum.WalkSpeed = 16 end
+    end
+end))
+
+track(UIS.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        if activeDrag then activeDrag(input.Position.X) end
+        if winDrag then winDrag(input.Position) end
+    end
+end))
+
+openBtn.MouseButton1Click:Connect(function() setMenu(not main.Visible) end)
+
+-- ============================================================
+-- ЦИКЛ
+-- ============================================================
+
+local slowT, fps, camFovTouched = 0, 60, false
+
+local function getPing()
+    local ok, v = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+    return ok and math.floor(v) or 0
+end
+
+local function hudStep()
+    fovCircle.Visible = CFG.fovShow
+    fovCircle.Size = UDim2.fromOffset(CFG.fovRadius * 2, CFG.fovRadius * 2)
+    fovStroke.Color = Color3.fromHex(CFG.fovColor)
+    xhair.Visible = CFG.crosshair
+    wm.Visible = CFG.watermark
+end
+
+local function slowStep()
+    wmLabel.Text = string.format('<font color="#%s">NEXUS</font> <font color="#8a90a6">|</font> %d fps <font color="#8a90a6">|</font> %d ms', T.accent:ToHex(), math.floor(fps), getPing())
+    espStep()
+    syncMarkers()
+    if CFG.fullbright then
+        if not fullbrightSaved then
+            fullbrightSaved = { Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime, GlobalShadows = Lighting.GlobalShadows, Ambient = Lighting.Ambient, FogEnd = Lighting.FogEnd }
+        end
+        Lighting.Brightness = 2; Lighting.ClockTime = 14; Lighting.GlobalShadows = false
+        Lighting.Ambient = Color3.fromRGB(178, 178, 178); Lighting.FogEnd = 1e6
+    elseif fullbrightSaved then
+        for k, v in pairs(fullbrightSaved) do Lighting[k] = v end
+        fullbrightSaved = nil
+    end
+end
+
+RunService:BindToRenderStep("NexusMain", Enum.RenderPriority.Camera.Value + 1, function(dt)
+    if unloaded then return end
+    Camera = Workspace.CurrentCamera or Camera
+    refreshMe()
+    fps = fps * 0.9 + (1 / math.max(dt, 1e-3)) * 0.1
+
+    local alive = hum ~= nil and root ~= nil and hum.Health > 0
+    if alive then
+        movementStep(dt)
+        if lock.active then lockStep(dt) end
+        maceStep(dt)   -- Auto-Mace (HvH из старого скрипта)
+        critStep(dt)   -- Auto-Crit
+        antiaimStep(dt)
+        autododgeStep(dt)
+        spin360Step(dt)
+        fakelagStep(dt)
+        camThirdStep(dt)
+    else
+        if mace.active or crit.active or lock.active then stopMace(true); stopCrit(true); lockRelease(true) end
+        flyOn = false
+        clearFakelagGhosts()
+    end
+
+    if CFG.customFov then Camera.FieldOfView = CFG.camFov; camFovTouched = true
+    elseif camFovTouched then Camera.FieldOfView = 70; camFovTouched = false end
+
+    markerStep()
+    hudStep()
+
+    slowT = slowT + dt
+    if slowT >= 0.1 then slowT = 0; slowStep() end
+end)
+
+-- ============================================================
+-- СТАРТ
+-- ============================================================
+
+rebuildFriendSet()
+for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
+track(Players.PlayerAdded:Connect(hookPlayer))
+track(Players.PlayerRemoving:Connect(function(p) clearEsp(p); refreshFriends() end))
+track(Players.PlayerAdded:Connect(function() task.defer(refreshFriends) end))
+
+selectTab(L("tab_mace"))
+toast("NEXUS v5", "Auto-Mace + Auto-Crit ready · menu: " .. CFG.menuKey, T.accent)
